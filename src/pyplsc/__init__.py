@@ -20,10 +20,38 @@ class BaseClass():
         pvals = (np.sum(perm_singvals >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
         return perm_singvals # In case it's useful---might as well since we computed it anyway
+    def bootstrap(self, n_boot=5000, confint_level=0.025):
+        if n_boot < 1:
+            raise ValueError('n_boot must be a positive integer')
+        self.n_boot_ = n_boot
+        self.confint_level_ = confint_level
+        # Get variables needed for bootstrapping
+        resample_vars = _get_vars_for_resampling(self.design_)
+        brain_resampled = []
+        design_resampled = []
+        print('Bootstrap resampling...')
+        for boot_n in tqdm(range(n_boot)):
+            (u, s, v), design_estimate = self._single_bootstrap_resample(*resample_vars)
+            # Collect
+            brain_resampled.append(v @ np.diag(s))            
+            design_resampled.append(design_estimate)
+        # Compute standard deviations for brain saliences to get bootstrap ratios
+        stds = np.stack(brain_resampled).std(axis=0)
+        self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
+        # Compute confidence intervals for design saliences
+        self.bootstrap_ci_ = np.quantile(np.stack(design_resampled), [confint_level, 1 - confint_level], axis=0)
 
 class BDA(BaseClass):
     def __init__(self, subtract=None):
         self.subtract = subtract
+    def _get_mat_to_factorize(self, X, design, stratifier):
+        # Get the matrix to be factorized
+        mean_centred = _get_mean_centred(
+            X=X,
+            design=design,
+            stratifier=stratifier,
+            subtract=self.subtract)
+        return mean_centred
     def fit(self, X, between=None, within=None, participant=None):
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for mean-centred PLS')
@@ -74,14 +102,27 @@ class BDA(BaseClass):
             subtract=self.subtract)
         s = svd(mean_centred, full_matrices=False, compute_uv=False)
         return s
-    def bootstrap(self, n_boot=5000, confint_level=0.025):
+    def _single_bootstrap_resample(self, *resample_vars):
+        # Get indices of resample
+        resample_idx = _get_resample_idx(*resample_vars)
+        # Run decomposition
+        mean_centred = _get_mean_centred(
+            X=self.X_[resample_idx],
+            design=self.design_[resample_idx],
+            stratifier=self.stratifier_[resample_idx],
+            subtract=self.subtract)
+        decomp = _svd_and_align(to_factorize=mean_centred,
+                                 target_v=self.brain_sals_)
+        # Brain scores
+        design_estimate = mean_centred @ self.brain_sals_
+        return decomp, design_estimate
+    def bootstrap_old(self, n_boot=5000, confint_level=0.025):
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Get variables needed for bootstrapping
         resample_vars = _get_vars_for_resampling(self.design_)
-        stratifier = _get_stratifier(self.design_)
         brain_resampled = []
         design_resampled = []
         print('Bootstrap resampling...')
@@ -92,7 +133,7 @@ class BDA(BaseClass):
             mean_centred = _get_mean_centred(
                 X=self.X_[resample_idx],
                 design=self.design_[resample_idx],
-                stratifier=stratifier[resample_idx],
+                stratifier=self.stratifier_[resample_idx],
                 subtract=self.subtract)
             u, s, v = svd(mean_centred, full_matrices=False)
             v = v.T
@@ -133,7 +174,6 @@ class PLSC():
             self.X_ @ self.brain_sals_, # Brain scores
             self.covariates_,
             stratifier)
-        set_trace()
     def _single_permutation(self):
         perm_idx = _get_permutation(self.design_)
         R = _get_stacked_cormats(
@@ -142,7 +182,28 @@ class PLSC():
             self.stratifier_[perm_idx])
         s = svd(R, full_matrices=False, compute_uv=False)
         return s
-    def bootstrap(self, n_boot=5000, confint_level=0.025):
+    def _single_bootstrap_resample(self, *resample_vars):
+        all_same = True
+        while all_same:    
+            # Get indices of resample
+            resample_idx = _get_resample_idx(*resample_vars)
+            # Check for no unique observations within any level
+            all_same = _validate_resample(resample_idx, self.stratifier_)
+        # Run decomposition
+        resampled_X = self.X_[resample_idx]
+        resampled_cov = self.covariates_[resample_idx]
+        stacked_cormats = _get_stacked_cormats(
+            resampled_X,
+            resampled_cov,
+            self._stratifier) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
+        decomp = _svd_and_align(to_factorize=stacked_cormats,
+                                 target_v=self.brain_sals_)
+        # Correlation between covariates and brain scores
+        design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
+                                               resampled_cov,
+                                               self.stratifier_)
+        return decomp, design_estimate
+    def bootstrap_old(self, n_boot=5000, confint_level=0.025):
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
@@ -169,10 +230,7 @@ class PLSC():
                 resampled_X,
                 resampled_cov,
                 stratifier) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
-            u, s, v = np.linalg.svd(
-                stacked_cormats,
-                full_matrices=False,
-                compute_uv=True)
+            u, s, v = np.linalg.svd(stacked_cormats, full_matrices=False)
             v = v.T
             # Rotate to align with original decomposition
             rotation, _ = orthogonal_procrustes(v, self.brain_sals_, check_finite=False)
@@ -249,19 +307,9 @@ def _get_mean_centred(X, design, stratifier=None, subtract=None):
     mean_centred = groupwise_means - groupwise_means.mean(axis=0)
     return mean_centred
 
-def _beh_svd(data, cov, strat, compute_uv=True):
-    # Get level-wise corelation matrices
-    submatrices = []
-    for level in np.unique(strat):
-        idx = strat == level
-        # Collect correlation matrix for this level of the stratifier
-        submatrix = _corr(cov[idx], data[idx])
-        submatrices.append(submatrix)
-    # Stack and decompose
-    R = np.concat(submatrices) # TODO: will this work with just one submatrix?
-    return np.linalg.svd(R, full_matrices=False, compute_uv=compute_uv)
-
 def _corr(X, Y):
+    # Rectangular correlation matrix between X and Y
+    
     # Center
     Xc = X - X.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
@@ -388,7 +436,8 @@ def _get_matrix_to_permute(between=None, within=None, participant=None, covariat
 
 def _get_stacked_cormats(X, covariates, stratifier):
     submatrices = []
-    for level in np.unique(stratifier):
+    n_levels = stratifier.max() + 1
+    for level in range(n_levels):
         idx = stratifier == level
         submatrix = _corr(covariates[idx], X[idx])
         submatrices.append(submatrix)
@@ -412,3 +461,11 @@ def _validate_resample(resample_idx, stratifier):
     # Invalid if all observations are identical within any level
     invalid = (mins == maxs).any()
     return invalid
+
+def _svd_and_align(to_factorize, target_v):
+    u, s, v = svd(to_factorize, full_matrices=False)
+    v = v.T
+    # Rotate to align with original decomposition
+    R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
+    v = v @ R
+    return u, s, v
