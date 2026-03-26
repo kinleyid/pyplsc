@@ -1,0 +1,13 @@
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyplsc"
+version = "0.0.1"
+description = "Python implementation of partial least squares correlation (PLSC)"
+authors = [{ name="Isaac Kinley", email="isaac.kinley@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.9"
+
