@@ -30,8 +30,23 @@ def test_bda_basic(fit_bda):
     yerr = bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
+    with pytest.raises(Exception):
+        yerr = bda.get_design_yerr([0, 1])
     bda.transform(lv_idx=0)
     bda.transform_design(lv_idx=0)
+    with pytest.raises(Exception):
+        bda.permute(0)
+    with pytest.raises(Exception):
+        bda.bootstrap(0)    
+
+def test_warnings(sample_data):
+    data, _, between, within, participant = sample_data
+    bda = pyplsc.BDA(pre_subtract='between')
+    with pytest.raises(Warning):
+        bda.fit(data, between=between)
+    bda = pyplsc.BDA(pre_subtract='within')
+    with pytest.raises(Warning):
+        bda.fit(data, within=within, participant=participant)
 
 def test_errors(sample_data):
     data, _, between, within, participant = sample_data
