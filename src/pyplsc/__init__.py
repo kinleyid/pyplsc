@@ -151,7 +151,7 @@ class BaseClass():
         boot_idxs = [self._get_resample(rng, *resample_vars)
                      for _ in range(n_boot)]
         boot_results = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method, svd_method, *resample_vars)
+            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method, svd_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
         )
         design_resampled, brain_resampled = zip(*boot_results)
@@ -258,7 +258,7 @@ class BDA(BaseClass):
     def _get_resample(self, rng, *resample_vars):
         resample = _get_resample(rng, *resample_vars)
         return resample
-    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method, *resample_vars):
+    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method):
         # Run decomposition
         mean_centred = _get_mean_centred(
             X=self.X_[resample_idx],
@@ -344,7 +344,7 @@ def _get_permutation(rng, design):
             # an array of unique participant IDs
             participant = participant_permutation[participant]
         # Shuffle within participants
-        perm_idx = np.lexsort((rng.rand(len(participant)), participant))
+        perm_idx = np.lexsort((rng.random(len(participant)), participant))
     return perm_idx
 
 def _get_stratifier(design):
