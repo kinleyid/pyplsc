@@ -34,6 +34,10 @@ class BaseClass():
             self.bootstrap_ratios_[:, lv_idx] *= -1
             self.bootstrap_ci_[..., lv_idx] *= -1
             self.bootstrap_ci_ = self.bootstrap_ci_[(1, 0), ...]
+    def transform(self, X=None):
+        if X is None:
+            X = self.X_
+        return X @ self.brain_sals_
     def permute(self, n_perm=5000, n_jobs=None):
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
@@ -46,7 +50,7 @@ class BaseClass():
         self.pvals_ = pvals
         self.perm_done = True
         return null_dist
-    def bootstrap(self, n_boot=5000, confint_level=0.025, n_jobs=None):
+    def bootstrap(self, n_boot=5000, confint_level=0.025, alignment_method='rotate', n_jobs=None):
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
@@ -57,7 +61,7 @@ class BaseClass():
         design_resampled = []
         boot_results = []
         boot_results = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_bootstrap_resample)(*resample_vars)
+            delayed(self._single_bootstrap_resample)(alignment_method, *resample_vars)
             for _ in tqdm(range(n_boot), desc="Resamples")
         )
         design_resampled, brain_resampled = zip(*boot_results)
@@ -65,8 +69,10 @@ class BaseClass():
         stds = np.stack(brain_resampled).std(axis=0)
         self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
-        self.bootstrap_ci_ = np.quantile(np.stack(design_resampled), [confint_level, 1 - confint_level], axis=0)
+        design_resampled = np.stack(design_resampled)
+        self.bootstrap_ci_ = np.quantile(design_resampled, [confint_level, 1 - confint_level], axis=0)
         self.boot_done = True
+        return design_resampled
         
 class BDA(BaseClass):
     def __init__(self, subtract=None):
@@ -81,7 +87,6 @@ class BDA(BaseClass):
         # TODO: check whether subtract option is possible given availability of factors
         # TODO: make sure lengths of inputs are all the same
         # TODO: enforce one between condition per participant
-        # SVD decomposition
         mean_centred = _get_mean_centred(
             X=self.X_,
             design=self.design_,
@@ -89,12 +94,6 @@ class BDA(BaseClass):
         self._initial_decomposition(mean_centred)
         self.design_stat_ = mean_centred @ self.brain_sals_ # Score per barycentre
         return self
-    def transform_brain(self, X=None):
-        # Brain scores
-        if X is None:
-            X = self.X_
-        brain_scores = X @ self.brain_sals_
-        return brain_scores
     def transform_design(self, Y=None):
         # Design scores
         if Y is None:
@@ -110,7 +109,7 @@ class BDA(BaseClass):
             subtract=self.subtract)
         s = svd(mean_centred, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, *resample_vars):
+    def _single_bootstrap_resample(self, alignment_method, *resample_vars):
         # Get indices of resample
         resample_idx = _get_resample_idx(*resample_vars)
         # Run decomposition
@@ -120,7 +119,8 @@ class BDA(BaseClass):
             stratifier=self.stratifier_[resample_idx],
             subtract=self.subtract)
         u, s, v = _svd_and_align(to_factorize=mean_centred,
-                                 target_v=self.brain_sals_)
+                                 target_v=self.brain_sals_,
+                                 alignment_method=alignment_method)
         brain_estimate = v @ np.diag(s)
         # Brain scores
         design_estimate = mean_centred @ self.brain_sals_
@@ -138,10 +138,14 @@ class PLSC(BaseClass):
             self.stratifier_)
         self._initial_decomposition(R)
         # Correlation between brain scores and covariates
-        brain_scores = self.X_ @ self.brain_sals_
+        brain_scores = self.transform()
         self.design_stat_ = _get_stacked_cormats(brain_scores,
                                                  self.covariates_,
                                                  self.stratifier_)
+    def transform_design(self, Y=None):
+        if Y is None:
+            Y = self.covariates_
+        return Y @ self.design_sals_
     def _single_permutation(self):
         perm_idx = _get_permutation(self.design_)
         R = _get_stacked_cormats(
@@ -150,7 +154,7 @@ class PLSC(BaseClass):
             self.stratifier_[perm_idx])
         s = svd(R, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, *resample_vars):
+    def _single_bootstrap_resample(self, alignment_method, *resample_vars):
         all_same = True
         while all_same:    
             # Get indices of resample
@@ -165,7 +169,8 @@ class PLSC(BaseClass):
             resampled_cov,
             self.stratifier_) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
         u, s, v = _svd_and_align(to_factorize=stacked_cormats,
-                                 target_v=self.brain_sals_)
+                                 target_v=self.brain_sals_,
+                                 alignment_method=alignment_method)
         brain_estimate = v @ np.diag(s)
         # Correlation between covariates and brain scores
         design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
@@ -308,10 +313,16 @@ def _validate_resample(resample_idx, stratifier):
     invalid = (mins == maxs).any()
     return invalid
 
-def _svd_and_align(to_factorize, target_v):
+def _svd_and_align(to_factorize, target_v, alignment_method):
     u, s, v = svd(to_factorize, full_matrices=False)
     v = v.T
-    # Rotate to align with original decomposition
-    R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
-    v = v @ R
+    # Align with original decomposition
+    if alignment_method == 'rotate':
+        # Via rotation
+        R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
+        v @= R
+    elif alignment_method == 'flip':
+        # Via correcting apparent sign flips
+        flips = np.sign(np.diag(v.T @ target_v))
+        v *= flips
     return u, s, v
