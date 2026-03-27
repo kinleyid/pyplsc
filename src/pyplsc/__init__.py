@@ -4,6 +4,8 @@ from tqdm import tqdm
 from scipy.linalg import orthogonal_procrustes
 from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from joblib import Parallel, delayed
 
 from pdb import set_trace
 
@@ -22,7 +24,18 @@ class BaseClass():
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
         self.brain_sals_ = v.T
-    def permute(self, n_perm=5000):
+    def permute(self, n_perm=5000, n_jobs=None):
+        if n_perm < 1:
+            raise ValueError('n_perm must be a positive integer')
+        perm_singvals = Parallel(n_jobs=n_jobs)(
+            delayed(self._single_permutation)()
+            for _ in tqdm(range(n_perm), desc="Permutations")
+        )
+        null_dist = np.stack(perm_singvals)
+        pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
+        self.pvals_ = pvals
+        return null_dist
+    def permute_old(self, n_perm=5000):
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
         perm_singvals = []
@@ -34,7 +47,7 @@ class BaseClass():
         pvals = (np.sum(perm_singvals >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
         return perm_singvals # In case it's useful---might as well since we computed it anyway
-    def bootstrap(self, n_boot=5000, confint_level=0.025):
+    def bootstrap(self, n_boot=5000, confint_level=0.025, n_jobs=None):
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
@@ -43,18 +56,18 @@ class BaseClass():
         resample_vars = _get_vars_for_resampling(self.design_)
         brain_resampled = []
         design_resampled = []
-        print('Bootstrap resampling...')
-        for boot_n in tqdm(range(n_boot)):
-            (u, s, v), design_estimate = self._single_bootstrap_resample(*resample_vars)
-            # Collect
-            brain_resampled.append(v @ np.diag(s))            
-            design_resampled.append(design_estimate)
+        boot_results = []
+        boot_results = Parallel(n_jobs=n_jobs)(
+            delayed(self._single_bootstrap_resample)(*resample_vars)
+            for _ in tqdm(range(n_boot), desc="Resamples")
+        )
+        design_resampled, brain_resampled = zip(*boot_results)
         # Compute standard deviations for brain saliences to get bootstrap ratios
         stds = np.stack(brain_resampled).std(axis=0)
         self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
         self.bootstrap_ci_ = np.quantile(np.stack(design_resampled), [confint_level, 1 - confint_level], axis=0)
-
+        
 class BDA(BaseClass):
     def __init__(self, subtract=None):
         self.subtract = subtract
@@ -105,11 +118,12 @@ class BDA(BaseClass):
             design=self.design_[resample_idx],
             stratifier=self.stratifier_[resample_idx],
             subtract=self.subtract)
-        decomp = _svd_and_align(to_factorize=mean_centred,
+        u, s, v = _svd_and_align(to_factorize=mean_centred,
                                  target_v=self.brain_sals_)
+        brain_estimate = v @ np.diag(s)
         # Brain scores
         design_estimate = mean_centred @ self.brain_sals_
-        return decomp, design_estimate
+        return design_estimate, brain_estimate
   
 class PLSC(BaseClass):
     def __init__(self):
@@ -149,14 +163,15 @@ class PLSC(BaseClass):
         stacked_cormats = _get_stacked_cormats(
             resampled_X,
             resampled_cov,
-            self._stratifier) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
-        decomp = _svd_and_align(to_factorize=stacked_cormats,
+            self.stratifier_) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
+        u, s, v = _svd_and_align(to_factorize=stacked_cormats,
                                  target_v=self.brain_sals_)
+        brain_estimate = v @ np.diag(s)
         # Correlation between covariates and brain scores
         design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
                                                resampled_cov,
                                                self.stratifier_)
-        return decomp, design_estimate
+        return design_estimate, brain_estimate
 
 def _get_permutation(design):
     # n_obs, between=None, participant=None)
@@ -201,18 +216,6 @@ def _get_mean_centred(X, design, stratifier=None, subtract=None):
     # Mean centre
     mean_centred = groupwise_means - groupwise_means.mean(axis=0)
     return mean_centred
-
-def _corr(X, Y):
-    Xc = X - X.mean(axis=0)
-    Yc = Y - Y.mean(axis=0)
-    
-    n = X.shape[0] - 1
-    stdX = np.sqrt((Xc ** 2).sum(axis=0) / n)
-    stdY = np.sqrt((Yc ** 2).sum(axis=0) / n)
-    
-    Xn = Xc / stdX
-    Yn = Yc / stdY
-    return Xn.T @ Yn / n
 
 def _get_groupwise_means(X, group_idx):
     n_groups = group_idx.max() + 1
@@ -274,6 +277,18 @@ def _get_stacked_cormats(X, covariates, stratifier):
         submatrices.append(submatrix)
     R = np.concat(submatrices)
     return R
+
+def _corr(X, Y):
+    Xc = X - X.mean(axis=0)
+    Yc = Y - Y.mean(axis=0)
+    
+    n = X.shape[0] - 1
+    stdX = np.sqrt((Xc ** 2).sum(axis=0) / n)
+    stdY = np.sqrt((Yc ** 2).sum(axis=0) / n)
+    
+    Xn = Xc / stdX
+    Yn = Yc / stdY
+    return Xn.T @ Yn / n
 
 def _validate_resample(resample_idx, stratifier):
     # Ensure that each stratfier level contains at least 2 unique observations
