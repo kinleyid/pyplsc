@@ -76,6 +76,13 @@ def test_bda_rng(fit_bda):
     pvals_2 = bda.pvals_
     assert all(np.isclose(pvals_1, pvals_2))
 
+def test_bda_pre_subtract(sample_data):
+    data, covariates, between, within, participant = sample_data
+    bda = pyplsc.BDA(pre_subtract='between')
+    bda.fit(X=data, between=between, within=within, participant=participant)
+    bda = pyplsc.BDA(pre_subtract='within')
+    bda.fit(X=data, between=between, within=within, participant=participant)
+
 def test_plsc_basic(sample_data):
     data, covariates, between, within, participant = sample_data
     plsc = pyplsc.PLSC()
