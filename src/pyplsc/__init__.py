@@ -10,10 +10,11 @@ from pdb import set_trace
 
 class BaseClass():
     # Parent class for PLSC and BDA
-    def __init__(self):
+    def __init__(self, random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self.__perm_done = False
         self.__boot_done = False
+        self.random_state = random_state
     def _setup_data(self, X, between, within, participant):
         if within is not None and participant is None:
             raise ValueError('Participants must be differentiated if there is a within-participants factor')
@@ -98,9 +99,13 @@ class BaseClass():
         """
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
+        # Pre-generate perm_idx
+        rng = np.random.default_rng(self.random_state)
+        perms = [_get_permutation(rng, self.design_)
+                 for _ in range(n_perm)]
         perm_singvals = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_permutation)()
-            for _ in tqdm(range(n_perm), desc="Permutations")
+            delayed(self._single_permutation)(perm)
+            for perm in tqdm(perms, desc='Permuting')
         )
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
@@ -141,12 +146,13 @@ class BaseClass():
         self.confint_level_ = confint_level
         # Get variables needed for bootstrapping
         resample_vars = _get_vars_for_resampling(self.design_)
-        brain_resampled = []
-        design_resampled = []
-        boot_results = []
+        # Pre-generate bootstrap samples
+        rng = np.random.default_rng(self.random_state)
+        boot_idxs = [self._get_resample(rng, *resample_vars)
+                     for _ in range(n_boot)]
         boot_results = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_bootstrap_resample)(alignment_method, svd_method, *resample_vars)
-            for _ in tqdm(range(n_boot), desc="Resamples")
+            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method, svd_method, *resample_vars)
+            for boot_idx in tqdm(boot_idxs, desc="Resampling")
         )
         design_resampled, brain_resampled = zip(*boot_results)
         # Compute standard deviations for brain saliences to get bootstrap ratios
@@ -159,8 +165,8 @@ class BaseClass():
         return design_resampled
         
 class BDA(BaseClass):
-    def __init__(self, pre_subtract=None):
-        super().__init__()
+    def __init__(self, pre_subtract=None, random_state=None):
+        super().__init__(random_state)
         self.pre_subtract = pre_subtract
     def fit(self, X, between=None, within=None, participant=None):
         # TODO: document
@@ -211,9 +217,7 @@ class BDA(BaseClass):
             sals = sals[:, lv_idx]
         design_scores = sals[Y]
         return design_scores
-    def _single_permutation(self):
-        # Get indices of permutation
-        perm_idx = _get_permutation(self.design_)
+    def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
         mean_centred = _get_mean_centred(
             X=self.X_,
@@ -222,9 +226,10 @@ class BDA(BaseClass):
             pre_subtract=self.pre_subtract)
         s = lapack_svd(mean_centred, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, alignment_method, svd_method, *resample_vars):
-        # Get indices of resample
-        resample_idx = _get_resample_idx(*resample_vars)
+    def _get_resample(self, rng, *resample_vars):
+        resample = _get_resample(rng, *resample_vars)
+        return resample
+    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method, *resample_vars):
         # Run decomposition
         mean_centred = _get_mean_centred(
             X=self.X_[resample_idx],
@@ -241,8 +246,8 @@ class BDA(BaseClass):
         return design_estimate, brain_estimate
   
 class PLSC(BaseClass):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, random_state=None):
+        super().__init__(random_state)
     def fit(self, X, covariates, between=None, within=None, participant=None):
         sort_idx = self._setup_data(X, between, within, participant)
         self.covariates_ = covariates[sort_idx]
@@ -260,21 +265,22 @@ class PLSC(BaseClass):
         if Y is None:
             Y = self.covariates_
         return Y @ self.design_sals_
-    def _single_permutation(self):
-        perm_idx = _get_permutation(self.design_)
+    def _single_permutation(self, perm_idx):
         R = _get_stacked_cormats(
             self.X_,
             self.covariates_[perm_idx],
             self.stratifier_[perm_idx])
         s = lapack_svd(R, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, alignment_method, svd_method, *resample_vars):
+    def _get_resample(self, rng, *resample_vars):
         all_same = True
         while all_same:    
             # Get indices of resample
-            resample_idx = _get_resample_idx(*resample_vars)
+            resample = _get_resample(rng, *resample_vars)
             # Check for no unique observations within any level
-            all_same = _validate_resample(resample_idx, self.stratifier_)
+            all_same = _validate_resample(resample, self.stratifier_)
+        return resample
+    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method):
         # Run decomposition
         resampled_X = self.X_[resample_idx]
         resampled_cov = self.covariates_[resample_idx]
@@ -293,23 +299,23 @@ class PLSC(BaseClass):
                                                self.stratifier_)
         return design_estimate, brain_estimate
 
-def _get_permutation(design):
+def _get_permutation(rng, design):
     # n_obs, between=None, participant=None)
     if design[-1, 1] == 0: # If no within-participants factor:
         # No between-participant conditions---just shuffle all rows
-        perm_idx = np.random.permutation(len(design))
+        perm_idx = rng.permutation(len(design))
     else:
         participant = design[:, 2]
         if design[-1, 0] > 0: # If a between-participants factor:
             # Shuffle participants
             n_participants = participant[-1] + 1 # Max participant idx + 1
-            participant_permutation = np.random.permutation(n_participants)
+            participant_permutation = rng.permutation(n_participants)
             # This next line works because "participant" is both an array of
             # integer labels and an integer index that could be used to index
             # an array of unique participant IDs
             participant = participant_permutation[participant]
         # Shuffle within participants
-        perm_idx = np.lexsort((np.random.rand(len(participant)), participant))
+        perm_idx = np.lexsort((rng.rand(len(participant)), participant))
     return perm_idx
 
 def _get_stratifier(design):
@@ -359,14 +365,31 @@ def _get_vars_for_resampling(design):
     participant_offsets = np.cumsum([0] + [len(r) for r in row_idx_by_participant])
     return row_idx, participants_by_between, participant_offsets
 
-def _get_resample_idx(row_idx, participants_by_between, participant_offsets):
+def _get_resample(rng, row_idx, participants_by_between, participant_offsets):
     sampled_rows = []
     for ps in participants_by_between:
-        samp = ps[np.random.randint(len(ps), size=len(ps))]
-        # sampled_rows.extend(row_idx_by_participant[p] for p in samp)
+        samp = ps[rng.integers(low=0, high=len(ps), size=len(ps))]
         sampled_rows.extend(row_idx[participant_offsets[p]:participant_offsets[p+1]] for p in samp)
-    resample_idx = np.concatenate(sampled_rows)
-    return resample_idx
+    resample = np.concatenate(sampled_rows)
+    return resample
+
+def _validate_resample(resample, stratifier):
+    # Ensure that each stratfier level contains at least 2 unique observations
+    # To do this quickly, compute min and max observation idx within category
+    # and check that min != max
+    resampled_levels = stratifier[resample]
+    order = np.argsort(resampled_levels)
+    stratifier = stratifier[order]
+    obs = resample[order]
+    # Stratifier level boundaries
+    boundaries = np.flatnonzero(np.diff(stratifier)) + 1
+    starts = np.r_[0, boundaries]
+    # Min/max observation per category
+    mins = np.minimum.reduceat(obs, starts)
+    maxs = np.maximum.reduceat(obs, starts)
+    # Invalid if all observations are identical within any level
+    invalid = (mins == maxs).any()
+    return invalid
 
 def _get_design_matrix(n_obs, between=None, within=None, participant=None):
     # Assign null column of zeros if absent, otherwise assign integer labels
@@ -414,24 +437,6 @@ def _corr(X, Y):
     Xn = Xc / stdX
     Yn = Yc / stdY
     return Xn.T @ Yn / n
-
-def _validate_resample(resample_idx, stratifier):
-    # Ensure that each stratfier level contains at least 2 unique observations
-    # To do this quickly, compute min and max observation idx within category
-    # and check that min != max
-    resampled_levels = stratifier[resample_idx]
-    order = np.argsort(resampled_levels)
-    stratifier = stratifier[order]
-    obs = resample_idx[order]
-    # Stratifier level boundaries
-    boundaries = np.flatnonzero(np.diff(stratifier)) + 1
-    starts = np.r_[0, boundaries]
-    # Min/max observation per category
-    mins = np.minimum.reduceat(obs, starts)
-    maxs = np.maximum.reduceat(obs, starts)
-    # Invalid if all observations are identical within any level
-    invalid = (mins == maxs).any()
-    return invalid
 
 def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
     if svd_method == 'lapack':
