@@ -9,6 +9,9 @@ from joblib import Parallel, delayed
 from pdb import set_trace
 
 class BaseClass():
+    def __init__(self):
+        self.perm_done = False
+        self.boot_done = False
     def _setup_data(self, X, between, within, participant):
         if within is not None and participant is None:
             raise ValueError('Participants must be differentiated if there is a within-participants factor')
@@ -23,6 +26,14 @@ class BaseClass():
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
         self.brain_sals_ = v.T
+    def flip_signs(self, lv_idx):
+        self.design_sals_[:, lv_idx] *= -1
+        self.brain_sals_[:, lv_idx] *= -1
+        self.design_stat_[:, lv_idx] *= -1
+        if self.boot_done:
+            self.bootstrap_ratios_[:, lv_idx] *= -1
+            self.bootstrap_ci_[..., lv_idx] *= -1
+            self.bootstrap_ci_ = self.bootstrap_ci_[(1, 0), ...]
     def permute(self, n_perm=5000, n_jobs=None):
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
@@ -33,6 +44,7 @@ class BaseClass():
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
+        self.perm_done = True
         return null_dist
     def bootstrap(self, n_boot=5000, confint_level=0.025, n_jobs=None):
         if n_boot < 1:
@@ -54,9 +66,11 @@ class BaseClass():
         self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
         self.bootstrap_ci_ = np.quantile(np.stack(design_resampled), [confint_level, 1 - confint_level], axis=0)
+        self.boot_done = True
         
 class BDA(BaseClass):
     def __init__(self, subtract=None):
+        super().__init__()
         self.subtract = subtract
     def fit(self, X, between=None, within=None, participant=None):
         if between is None and within is None:
@@ -114,8 +128,7 @@ class BDA(BaseClass):
   
 class PLSC(BaseClass):
     def __init__(self):
-        # No initialization variables
-        pass
+        super().__init__()
     def fit(self, X, covariates, between=None, within=None, participant=None):
         sort_idx = self._setup_data(X, between, within, participant)
         self.covariates_ = covariates[sort_idx]
