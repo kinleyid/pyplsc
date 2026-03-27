@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyplsc"
+dependencies = ["setuptools>=61.0", "numpy", "tqdm", "joblib", "scikit-learn", "scipy"]
 version = "0.0.1"
 description = "Python implementation of partial least squares correlation (PLSC)"
 authors = [{ name="Isaac Kinley", email="isaac.kinley@gmail.com" }]
