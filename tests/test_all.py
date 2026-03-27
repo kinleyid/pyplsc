@@ -18,7 +18,7 @@ def sample_data():
 @pytest.fixture
 def fit_bda(sample_data):
     data, _, between, within, participant = sample_data
-    bda = pyplsc.BDA()
+    bda = pyplsc.BDA(random_state=123)
     bda.fit(X=data, between=between, within=within, participant=participant)
     return bda
 
@@ -26,7 +26,7 @@ def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     bda = fit_bda
     bda.permute(n_perm=20)
-    bda.bootstrap(n_boot=20)
+    bda.bootstrap(n_boot=200)
     yerr = bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
@@ -56,11 +56,9 @@ def test_flips(fit_bda):
     assert np.isclose(sals_1, -sals_2).all()
     assert np.isclose(recon_1, recon_2).all()
 
-def test_bda_rng(sample_data):
+def test_bda_rng(fit_bda):
     # Test random seeding
-    data, _, between, within, participant = sample_data
-    bda = pyplsc.BDA(random_state=123)
-    bda.fit(X=data, between=between, within=within, participant=participant)
+    bda = fit_bda
     bda.permute(n_perm=20)
     pvals_1 = bda.pvals_
     bda.permute(n_perm=20)
