@@ -30,8 +30,8 @@ def test_bda_basic(fit_bda):
     yerr = bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
-    bda.transform()
-    bda.transform_design()
+    bda.transform(lv_idx=0)
+    bda.transform_design(lv_idx=0)
 
 def test_errors(sample_data):
     data, _, between, within, participant = sample_data
@@ -43,8 +43,11 @@ def test_errors(sample_data):
         # Within condition without a way to differentiate participants
         bda.fit(data, within=within)
     with pytest.raises(Exception):
-        # Within condition without a way to differentiate participants
+        # Different length of condition indicator vs data
         bda.fit(data, between=between[:(len(data) - 1)])
+    with pytest.raises(Exception):
+        # Nothing to stratify observations
+        bda.fit(data, between=[0]*len(data))
     with pytest.raises(Exception):
         # yerr without having resampled
         bda.get_design_yerr(0)
@@ -89,5 +92,5 @@ def test_plsc_basic(sample_data):
     plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
     plsc.permute(n_perm=2)
     plsc.bootstrap(n_boot=2)
-    plsc.transform()
-    plsc.transform_design()
+    plsc.transform(lv_idx=0)
+    plsc.transform_design(lv_idx=0)
