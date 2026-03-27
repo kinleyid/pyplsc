@@ -290,10 +290,13 @@ class PLSC(BaseClass):
         self.design_stat_ = _get_stacked_cormats(brain_scores,
                                                  self.covariates_,
                                                  self.stratifier_)
-    def transform_design(self, Y=None):
+    def transform_design(self, Y=None, lv_idx=None):
         if Y is None:
             Y = self.covariates_
-        return Y @ self.design_sals_
+        sals = self.design_sals_
+        if lv_idx is not None:
+            sals = sals[:, lv_idx]
+        return Y.T @ sals
     def _single_permutation(self, perm_idx):
         R = _get_stacked_cormats(
             self.X_,

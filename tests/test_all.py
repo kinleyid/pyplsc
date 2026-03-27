@@ -30,6 +30,8 @@ def test_bda_basic(fit_bda):
     yerr = bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
+    bda.transform()
+    bda.transform_design()
 
 def test_errors(sample_data):
     data, _, between, within, participant = sample_data
@@ -46,8 +48,17 @@ def test_errors(sample_data):
     with pytest.raises(Exception):
         # yerr without having resampled
         bda.get_design_yerr(0)
+    with pytest.raises(Exception):
+        # yerr without having resampled
+        bda.pre_subtract = 'within'
+        bda.fit(data, between=between)
+    with pytest.raises(Exception):
+        # yerr without having resampled
+        bda.pre_subtract = 'between'
+        bda.fit(data, within=within, participant=participant)
 
 def test_flips(fit_bda):
+    fit_bda.bootstrap(n_boot=2)
     sals_1 = fit_bda.brain_sals_[:, 0].copy()
     recon_1 = fit_bda.design_sals_ @ fit_bda.brain_sals_.T
     fit_bda.flip_signs(0)
@@ -71,3 +82,5 @@ def test_plsc_basic(sample_data):
     plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
     plsc.permute(n_perm=2)
     plsc.bootstrap(n_boot=2)
+    plsc.transform()
+    plsc.transform_design()
