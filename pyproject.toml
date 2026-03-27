@@ -11,3 +11,12 @@ authors = [{ name="Isaac Kinley", email="isaac.kinley@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.9"
 
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=pyplsc --cov-report=xml --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["pyplsc"]
+omit = ["tests/*"]
