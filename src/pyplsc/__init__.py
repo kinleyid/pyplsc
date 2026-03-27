@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from scipy.linalg import orthogonal_procrustes
 from sklearn.utils.extmath import randomized_svd
-from numpy.linalg import svd
+from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed
 
 from pdb import set_trace
@@ -22,7 +22,7 @@ class BaseClass():
         self.X_ = X[sort_idx]
         return sort_idx
     def _initial_decomposition(self, to_factorize):
-        u, s, v = svd(to_factorize, full_matrices=False, compute_uv=True)
+        u, s, v = lapack_svd(to_factorize, full_matrices=False, compute_uv=True)
         self.singular_vals_ = s
         self.n_lv_ = len(s)
         self.variance_explained_ = s / sum(s)
@@ -107,7 +107,7 @@ class BaseClass():
         self.pvals_ = pvals
         self.__perm_done = True
         return null_dist
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', svd_method='lapack', n_jobs=1):
         """
         Perform bootstrap resampling to assess the reliability of saliences.
 
@@ -119,6 +119,8 @@ class BaseClass():
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
             Method to be used for aligning recomputed brain saliences with original brain saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
+        svd_method : string, optional
+            Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -143,7 +145,7 @@ class BaseClass():
         design_resampled = []
         boot_results = []
         boot_results = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_bootstrap_resample)(alignment_method, *resample_vars)
+            delayed(self._single_bootstrap_resample)(alignment_method, svd_method, *resample_vars)
             for _ in tqdm(range(n_boot), desc="Resamples")
         )
         design_resampled, brain_resampled = zip(*boot_results)
@@ -218,9 +220,9 @@ class BDA(BaseClass):
             design=self.design_[perm_idx],
             stratifier=self.stratifier_[perm_idx],
             pre_subtract=self.pre_subtract)
-        s = svd(mean_centred, full_matrices=False, compute_uv=False)
+        s = lapack_svd(mean_centred, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, alignment_method, *resample_vars):
+    def _single_bootstrap_resample(self, alignment_method, svd_method, *resample_vars):
         # Get indices of resample
         resample_idx = _get_resample_idx(*resample_vars)
         # Run decomposition
@@ -229,9 +231,10 @@ class BDA(BaseClass):
             design=self.design_[resample_idx],
             stratifier=self.stratifier_[resample_idx],
             pre_subtract=self.pre_subtract)
-        u, s, v = _svd_and_align(to_factorize=mean_centred,
-                                 target_v=self.brain_sals_,
-                                 alignment_method=alignment_method)
+        s, v = _svd_and_align(to_factorize=mean_centred,
+                              target_v=self.brain_sals_,
+                              alignment_method=alignment_method,
+                              svd_method=svd_method)
         brain_estimate = v @ np.diag(s)
         # Brain scores
         design_estimate = mean_centred @ self.brain_sals_
@@ -263,9 +266,9 @@ class PLSC(BaseClass):
             self.X_,
             self.covariates_[perm_idx],
             self.stratifier_[perm_idx])
-        s = svd(R, full_matrices=False, compute_uv=False)
+        s = lapack_svd(R, full_matrices=False, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, alignment_method, *resample_vars):
+    def _single_bootstrap_resample(self, alignment_method, svd_method, *resample_vars):
         all_same = True
         while all_same:    
             # Get indices of resample
@@ -279,9 +282,10 @@ class PLSC(BaseClass):
             resampled_X,
             resampled_cov,
             self.stratifier_) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
-        u, s, v = _svd_and_align(to_factorize=stacked_cormats,
-                                 target_v=self.brain_sals_,
-                                 alignment_method=alignment_method)
+        s, v = _svd_and_align(to_factorize=stacked_cormats,
+                              target_v=self.brain_sals_,
+                              alignment_method=alignment_method,
+                              svd_method=svd_method)
         brain_estimate = v @ np.diag(s)
         # Correlation between covariates and brain scores
         design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
@@ -429,8 +433,13 @@ def _validate_resample(resample_idx, stratifier):
     invalid = (mins == maxs).any()
     return invalid
 
-def _svd_and_align(to_factorize, target_v, alignment_method):
-    u, s, v = svd(to_factorize, full_matrices=False)
+def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
+    if svd_method == 'lapack':
+        _, s, v = lapack_svd(to_factorize, full_matrices=False)
+    elif svd_method == 'randomized':
+        _, s, v = randomized_svd(to_factorize,
+                                 n_components=len(to_factorize),
+                                 flip_sign=False) # Don't bother, we're about to align it ourselves
     v = v.T
     # Align with original decomposition
     if alignment_method == 'rotate':
@@ -441,4 +450,4 @@ def _svd_and_align(to_factorize, target_v, alignment_method):
         # Via correcting apparent sign flips
         flips = np.sign(np.diag(v.T @ target_v))
         v *= flips
-    return u, s, v
+    return s, v
