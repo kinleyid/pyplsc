@@ -163,6 +163,35 @@ class BaseClass():
         self.bootstrap_ci_ = np.quantile(design_resampled, [(1 - confint_level)/2, confint_level/2], axis=0)
         self.__boot_done = True
         return design_resampled
+    def get_design_yerr(self, lv_idx):
+        """
+        Get yerr for matplotlib barplots.
+
+        Parameters
+        ----------
+        lv_idx : int
+            Integer indexing the latent variable of interest.
+
+        Raises
+        ------
+        ValueError
+            DESCRIPTION.
+
+        Returns
+        -------
+        yerr : numpy.ndarray
+            yerr value that can be passed to matplotib's pyplot.bar().
+
+        """
+        if not self.__boot_done:
+            raise ValueError('Bootstrap resampling must be done before confidence intervals can be extracted')
+        if not isinstance(lv_idx, int):
+            raise ValueError('lv_idx must be an integer index of a single latent variable')
+        est = self.design_stat_
+        ci = self.bootstrap_ci_[..., lv_idx]
+        yerr = np.array([ci[1] - est,
+                         est - ci[0]])
+        return yerr
         
 class BDA(BaseClass):
     def __init__(self, pre_subtract=None, random_state=None):
@@ -426,7 +455,7 @@ def _get_stacked_cormats(X, covariates, stratifier):
     return R
 
 def _corr(X, Y):
-    # Compute a rectangular 
+    # Compute a rectangular correlation matrix between X and Y
     Xc = X - X.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
     
@@ -439,6 +468,7 @@ def _corr(X, Y):
     return Xn.T @ Yn / n
 
 def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
+    # Factorize to_factorize and align with target_v
     if svd_method == 'lapack':
         _, s, v = lapack_svd(to_factorize, full_matrices=False)
     elif svd_method == 'randomized':
