@@ -1,6 +1,6 @@
 
 [build-system]
-requires = ["setuptools>=61.0", "numpy", "tqdm", "joblib", "sklearn", "scipy"]
+requires = ["setuptools>=61.0", "numpy", "tqdm", "joblib", "scikit-learn", "scipy"]
 build-backend = "setuptools.build_meta"
 
 [project]
