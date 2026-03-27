@@ -111,7 +111,7 @@ class BDA(BaseClass):
         design_estimate = mean_centred @ self.brain_sals_
         return decomp, design_estimate
   
-class PLSC():
+class PLSC(BaseClass):
     def __init__(self):
         # No initialization variables
         pass
@@ -177,20 +177,6 @@ def _get_permutation(design):
         perm_idx = np.lexsort((np.random.rand(len(participant)), participant))
     return perm_idx
 
-def _setup_for_bootstrapping(data, design, participant, between=None):
-    # Create table containing both design info and data
-    design_with_data = design.copy().assign(data=list(data))
-    # Get sub-tables corresponding to (possibly one, possibly multiple) observations per participant
-    ptptwise_subtables = dict(tuple(design_with_data.groupby(participant)))
-    if between:
-        # Which participants are in which between conditions?
-        groupwise_ptpts = design.groupby(between)[participant].apply(np.unique)
-    else:
-        # Group by a dummy variable that's the same for everyone
-        # Just so we can use the same code later whether or not there's a between-participants condition
-        groupwise_ptpts = design.groupby(lambda _: 0)[participant].apply(np.unique)
-    return design_with_data, ptptwise_subtables, groupwise_ptpts
-
 def _get_stratifier(design):
     # Get unique combinations of between and within factors
     _, stratifier = np.unique(design[:, :2], axis=0, return_inverse=True)
@@ -237,24 +223,6 @@ def _get_groupwise_means(X, group_idx):
         groupwise_means[group] = X[group_idx == group].mean(axis=0)
     return groupwise_means
 
-def _build_model_matrix(covariates=None, between=None, within=None, participant=None):
-    # Build matrix containing indicators and covariates, if any
-    # Order is ([within, participant,] [between,] [covariates])
-    if within is not None:
-        # If there is a within-participants condition, we need to keep
-        # track of it as well as participant identity
-        columns = (within, participant)
-        if between is not None:
-            columns += (between,)
-    else:
-        # Otherwise we only need to keep track of between-participants
-        # condition
-        columns = (between,)
-    if covariates is not None:
-        columns += covariates
-    matrix = np.column_stack(columns)
-    return matrix
-
 def _get_vars_for_resampling(design):
     # Set up variables used for resampling
     row_idx = np.arange(len(design))
@@ -297,51 +265,6 @@ def _get_design_matrix(n_obs, between=None, within=None, participant=None):
     design_matrix = np.column_stack((between, within, participant))
     design_matrix = design_matrix[sort_idx]
     return design_matrix, sort_idx
-
-def _set_up_indicators(obj, n_obs, between=None, within=None, participant=None):
-    # TODO: ensure that if group id is higher, ptpt id is higher
-    
-    # Assign none if absent, otherwise assign integer labels
-    if between is None:
-        obj.between_ = None
-    else:
-        _, obj.between_ = np.unique(between, return_inverse=True)
-    if within is None:
-        obj.within_ = None
-        obj.participant_ = None
-    else:
-        _, obj.within_ = np.unique(within, return_inverse=True)
-        _, obj.participant_ = np.unique(participant, return_inverse=True)
-    
-    # Sort by between, then within, then participant, if applicable
-    if obj.between_ is None and obj.within_ is None:
-        return np.arange(n_obs)
-    else:
-        if obj.within_ is not None:
-            sort_key = (obj.within_, obj.participant_)
-            if obj.between_ is not None:
-                sort_key += (obj.between_,)
-            sort_idx = np.lexsort(sort_key)
-            obj.within_ = obj.within_[sort_idx]
-            obj.participant_ = obj.participant_[sort_idx]
-        else:
-            sort_idx = np.argsort(obj.between_)
-        if obj.between_ is not None:
-            obj.between_ = obj.between_[sort_idx]
-        # Requires that object already has X_
-        obj.X_ = obj.X_[sort_idx]
-
-def _get_matrix_to_permute(between=None, within=None, participant=None, covariates=None):
-    cols_to_permute = ()
-    if within is not None:
-        # If there is a within-participants condition, we need to keep
-        # track of it as well as participant identity
-        cols_to_permute += (within, participant)
-    if between is not None:
-        cols_to_permute += (between,)
-    if covariates is not None:
-        cols_to_permute += covariates
-    return np.column_stack(cols_to_permute)
 
 def _get_stacked_cormats(X, covariates, stratifier):
     submatrices = []
