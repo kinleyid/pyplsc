@@ -9,9 +9,11 @@ from joblib import Parallel, delayed
 from pdb import set_trace
 
 class BaseClass():
+    # Parent class for PLSC and BDA
     def __init__(self):
-        self.perm_done = False
-        self.boot_done = False
+        # Private properties for tracking whether permutation testing and bootstrap resampling have been done
+        self.__perm_done = False
+        self.__boot_done = False
     def _setup_data(self, X, between, within, participant):
         if within is not None and participant is None:
             raise ValueError('Participants must be differentiated if there is a within-participants factor')
@@ -27,18 +29,73 @@ class BaseClass():
         self.design_sals_ = u
         self.brain_sals_ = v.T
     def flip_signs(self, lv_idx):
+        """
+        Flips the signs of one or more latent variables, to aid with interpretation.
+
+        Parameters
+        ----------
+        lv_idx : integer or list
+            The index or indices of latent variables whose signs should be flipped.
+
+        Returns
+        -------
+        None.
+
+        """
         self.design_sals_[:, lv_idx] *= -1
         self.brain_sals_[:, lv_idx] *= -1
         self.design_stat_[:, lv_idx] *= -1
-        if self.boot_done:
+        if self.__boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
             self.bootstrap_ci_[..., lv_idx] *= -1
             self.bootstrap_ci_ = self.bootstrap_ci_[(1, 0), ...]
-    def transform(self, X=None):
+    def transform(self, X=None, lv_idx=None):
+        """
+        Compute brain scores---i.e., coordinates of brain data in the new basis defined by the latent variables.
+
+        Parameters
+        ----------
+        X : numpy.ndarray, optional
+            Brain data to transform. The default is None, which yields brain scores for the data on which the model was fit.
+        lv_idx : index, optional
+            Index of latent variable(s) for which to compute brain scores. Default is None, which computes brain scores for all latent variables.
+
+        Returns
+        -------
+        brain_scores : numpy.ndarray
+            A 2D array of brain scores where rows correspond to different observations and columns correspond to different latent variables.
+
+        """
         if X is None:
             X = self.X_
-        return X @ self.brain_sals_
-    def permute(self, n_perm=5000, n_jobs=None):
+        sals = self.brain_sals_
+        if lv_idx is not None:
+            sals = sals[:, lv_idx]
+        brain_scores = X @ sals
+        return brain_scores
+    def permute(self, n_perm=5000, n_jobs=1):
+        """
+        Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the pvals_ property.
+
+        Parameters
+        ----------
+        n_perm : int, optional
+            Number of permutations t operform. The default is 5000.
+        n_jobs : int, optional
+            Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
+
+        Raises
+        ------
+        ValueError
+            # TODO: document
+            DESCRIPTION.
+
+        Returns
+        -------
+        null_dist : numpy.ndarray
+            2D array containing null distribution of singular values, where each row is a different permutation and each columns is a different singular value.
+
+        """
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
         perm_singvals = Parallel(n_jobs=n_jobs)(
@@ -48,9 +105,34 @@ class BaseClass():
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
-        self.perm_done = True
+        self.__perm_done = True
         return null_dist
-    def bootstrap(self, n_boot=5000, confint_level=0.025, alignment_method='rotate', n_jobs=None):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', n_jobs=1):
+        """
+        Perform bootstrap resampling to assess the reliability of saliences.
+
+        Parameters
+        ----------
+        n_boot : int, optional
+            Number of bootstrap resamples to compute. The default is 5000.
+        confint_level : float, optional
+            The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
+        alignment_method : string, optional
+            Method to be used for aligning recomputed brain saliences with original brain saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
+        n_jobs : int, optional
+            Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
+
+        Raises
+        ------
+        ValueError
+            DESCRIPTION.
+
+        Returns
+        -------
+        design_resampled : numpy.ndarray
+            # TODO: describe
+
+        """
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
@@ -70,43 +152,72 @@ class BaseClass():
         self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
         design_resampled = np.stack(design_resampled)
-        self.bootstrap_ci_ = np.quantile(design_resampled, [confint_level, 1 - confint_level], axis=0)
-        self.boot_done = True
+        self.bootstrap_ci_ = np.quantile(design_resampled, [(1 - confint_level)/2, confint_level/2], axis=0)
+        self.__boot_done = True
         return design_resampled
         
 class BDA(BaseClass):
-    def __init__(self, subtract=None):
+    def __init__(self, pre_subtract=None):
         super().__init__()
-        self.subtract = subtract
+        self.pre_subtract = pre_subtract
     def fit(self, X, between=None, within=None, participant=None):
+        # TODO: document
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
+        if self.pre_subtract is not None:
+            if self.pre_subtract == 'between':
+                if between is None:
+                    raise ValueError('Pre-subtracting between-participant condition means is not possible when no between-participant condition is defined')
+                if within is None:
+                    raise Warning('No effect of between-participant condition will be detectable if between-participant condition means are pre-subtracted and no within-participant condition is defined.')
+            if self.pre_subtract == 'within':
+                if within is None:
+                    raise ValueError('Pre-subtracting within-participant condition means is not possible when no within-participant condition is definted')
+                if between is None:
+                    raise Warning('No effect of within-participant condition will be detectable if within-participant condition means are pre-subtracted and no between-participant condition is defined.')
         self._setup_data(X, between, within, participant)
-        # TODO: enfore categoricity? I.e., check indicator arrays for float values
-        # TODO: check whether there are multiple levels of within and between factors
-        # TODO: check whether subtract option is possible given availability of factors
-        # TODO: make sure lengths of inputs are all the same
+        if len(np.unique(self.stratifier_)) == 1:
+            raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
         # TODO: enforce one between condition per participant
         mean_centred = _get_mean_centred(
             X=self.X_,
             design=self.design_,
-            subtract=self.subtract)
+            pre_subtract=self.pre_subtract)
         self._initial_decomposition(mean_centred)
         self.design_stat_ = mean_centred @ self.brain_sals_ # Score per barycentre
         return self
-    def transform_design(self, Y=None):
-        # Design scores
+    def transform_design(self, Y=None, lv_idx=None):
+        """
+        Compute design scores
+
+        Parameters
+        ----------
+        Y : numpy.ndarray, optional
+            # TODO: explain. The default is None.
+        lv_idx : index, optional
+
+        Returns
+        -------
+        design_scores : numpy.ndarray
+            A 2D array of design scores where rows correspond to different observations and columns correspond to different latent variables.
+
+        """
         if Y is None:
             Y = self.stratifier_
-        design_scores = self.design_sals_[Y]
+        sals = self.design_sals_
+        if lv_idx is not None:
+            sals = sals[:, lv_idx]
+        design_scores = sals[Y]
         return design_scores
     def _single_permutation(self):
+        # Get indices of permutation
         perm_idx = _get_permutation(self.design_)
+        # Compute SVD for this permutation
         mean_centred = _get_mean_centred(
             X=self.X_,
             design=self.design_[perm_idx],
             stratifier=self.stratifier_[perm_idx],
-            subtract=self.subtract)
+            pre_subtract=self.pre_subtract)
         s = svd(mean_centred, full_matrices=False, compute_uv=False)
         return s
     def _single_bootstrap_resample(self, alignment_method, *resample_vars):
@@ -117,7 +228,7 @@ class BDA(BaseClass):
             X=self.X_[resample_idx],
             design=self.design_[resample_idx],
             stratifier=self.stratifier_[resample_idx],
-            subtract=self.subtract)
+            pre_subtract=self.pre_subtract)
         u, s, v = _svd_and_align(to_factorize=mean_centred,
                                  target_v=self.brain_sals_,
                                  alignment_method=alignment_method)
@@ -202,18 +313,18 @@ def _get_stratifier(design):
     _, stratifier = np.unique(design[:, :2], axis=0, return_inverse=True)
     return stratifier
 
-def _pre_centre(X, design, subtract):
+def _pre_centre(X, design, pre_subtract):
     # Pre-subtract between- or within-wise means if applicable
-    if subtract == 'between':
+    if pre_subtract == 'between':
         group_idx = design[:, 0]
-    elif subtract == 'within':
+    elif pre_subtract == 'within':
         group_idx = design[:, 1]
     rowwise_group_means = _get_groupwise_means(X, group_idx)[group_idx]
     return X - rowwise_group_means
 
-def _get_mean_centred(X, design, stratifier=None, subtract=None):
-    if subtract is not None:
-        X = _pre_centre(X, design, subtract)
+def _get_mean_centred(X, design, stratifier=None, pre_subtract=None):
+    if pre_subtract is not None:
+        X = _pre_centre(X, design, pre_subtract)
     # Compute group-wise means
     if stratifier is None: # Might not be pre-computed
         stratifier = _get_stratifier(design)
@@ -266,10 +377,14 @@ def _get_design_matrix(n_obs, between=None, within=None, participant=None):
     else:
         _, within = np.unique(within, return_inverse=True)
         _, participant = np.unique(participant, return_inverse=True)
+
+    if len(set(map(len, (between, within, participant)))) > 1:
+        raise ValueError('between, within, and participant must have the same length (or be set to None)')
     
     # Sort by between, then participant, then within, if applicable
     sort_idx = np.lexsort((within, participant, between))
     design_matrix = np.column_stack((between, within, participant))
+        
     design_matrix = design_matrix[sort_idx]
     return design_matrix, sort_idx
 
@@ -284,6 +399,7 @@ def _get_stacked_cormats(X, covariates, stratifier):
     return R
 
 def _corr(X, Y):
+    # Compute a rectangular 
     Xc = X - X.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
     
