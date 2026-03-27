@@ -203,17 +203,16 @@ def _get_mean_centred(X, design, stratifier=None, subtract=None):
     return mean_centred
 
 def _corr(X, Y):
-    # Rectangular correlation matrix between X and Y
-    
-    # Center
     Xc = X - X.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
-    # Covariance
-    cov = Xc.T @ Yc / (X.shape[0] - 1)
-    # Normalize
-    stdX = X.std(axis=0, ddof=1)
-    stdY = Y.std(axis=0, ddof=1)
-    return cov / np.outer(stdX, stdY)
+    
+    n = X.shape[0] - 1
+    stdX = np.sqrt((Xc ** 2).sum(axis=0) / n)
+    stdY = np.sqrt((Yc ** 2).sum(axis=0) / n)
+    
+    Xn = Xc / stdX
+    Yn = Yc / stdY
+    return Xn.T @ Yn / n
 
 def _get_groupwise_means(X, group_idx):
     n_groups = group_idx.max() + 1
