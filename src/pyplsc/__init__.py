@@ -187,7 +187,7 @@ class BaseClass():
             raise ValueError('Bootstrap resampling must be done before confidence intervals can be extracted')
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer index of a single latent variable')
-        est = self.design_stat_
+        est = self.design_stat_[:, lv_idx]
         ci = self.bootstrap_ci_[..., lv_idx]
         yerr = np.array([ci[1] - est,
                          est - ci[0]])

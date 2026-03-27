@@ -25,8 +25,11 @@ def fit_bda(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     bda = fit_bda
-    bda.permute(n_perm=2)
-    bda.bootstrap(n_boot=2)
+    bda.permute(n_perm=100)
+    bda.bootstrap(n_boot=100)
+    yerr = bda.get_design_yerr(0)
+    assert (yerr >= 0).all()
+    assert yerr.shape[0] == 2
 
 def test_flips(fit_bda):
     sals_1 = fit_bda.brain_sals_[:, 0].copy()
