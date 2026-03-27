@@ -4,7 +4,6 @@ from tqdm import tqdm
 from scipy.linalg import orthogonal_procrustes
 from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from joblib import Parallel, delayed
 
 from pdb import set_trace
@@ -35,18 +34,6 @@ class BaseClass():
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
         return null_dist
-    def permute_old(self, n_perm=5000):
-        if n_perm < 1:
-            raise ValueError('n_perm must be a positive integer')
-        perm_singvals = []
-        print('Permuting...')
-        for perm_n in tqdm(range(n_perm)):
-            s = self._single_permutation()
-            perm_singvals.append(s)
-        perm_singvals = np.stack(perm_singvals)
-        pvals = (np.sum(perm_singvals >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
-        self.pvals_ = pvals
-        return perm_singvals # In case it's useful---might as well since we computed it anyway
     def bootstrap(self, n_boot=5000, confint_level=0.025, n_jobs=None):
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
