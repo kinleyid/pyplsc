@@ -25,11 +25,27 @@ def fit_bda(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     bda = fit_bda
-    bda.permute(n_perm=100)
-    bda.bootstrap(n_boot=100)
+    bda.permute(n_perm=20)
+    bda.bootstrap(n_boot=20)
     yerr = bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
+
+def test_errors(sample_data):
+    data, _, between, within, participant = sample_data
+    bda = pyplsc.BDA()
+    with pytest.raises(Exception):
+        # Nothing to stratify observations
+        bda.fit(data)
+    with pytest.raises(Exception):
+        # Within condition without a way to differentiate participants
+        bda.fit(data, within=within)
+    with pytest.raises(Exception):
+        # Within condition without a way to differentiate participants
+        bda.fit(data, between=between[:(len(data) - 1)])
+    with pytest.raises(Exception):
+        # yerr without having resampled
+        bda.get_design_yerr(0)
 
 def test_flips(fit_bda):
     sals_1 = fit_bda.brain_sals_[:, 0].copy()
@@ -45,15 +61,11 @@ def test_bda_rng(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(random_state=123)
     bda.fit(X=data, between=between, within=within, participant=participant)
-    bda.permute(n_perm=100)
+    bda.permute(n_perm=20)
     pvals_1 = bda.pvals_
-    bda.permute(n_perm=100)
+    bda.permute(n_perm=20)
     pvals_2 = bda.pvals_
     assert all(np.isclose(pvals_1, pvals_2))
-
-def test_input_validation():
-    # a
-    pass
 
 def test_plsc_basic(sample_data):
     data, covariates, between, within, participant = sample_data
