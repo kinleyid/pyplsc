@@ -25,6 +25,7 @@ def fit_bda(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     bda = fit_bda
+    assert len(bda.labels_) == len(bda.design_sals_)
     bda.permute(n_perm=20)
     bda.bootstrap(n_boot=200)
     yerr = bda.get_design_yerr(0)
@@ -106,6 +107,7 @@ def test_plsc_basic(sample_data):
     data, covariates, between, within, participant = sample_data
     plsc = pyplsc.PLSC()
     plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
+    assert len(plsc.labels_) == len(plsc.design_sals_)
     plsc.permute(n_perm=2)
     plsc.bootstrap(n_boot=2)
     plsc.transform(lv_idx=0)
