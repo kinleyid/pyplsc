@@ -2,6 +2,7 @@
 import pytest
 import pyplsc
 import numpy as np
+import pandas as pd
 
 from pdb import set_trace
 
@@ -22,24 +23,30 @@ def fit_bda(sample_data):
     bda.fit(X=data, between=between, within=within, participant=participant)
     return bda
 
+@pytest.fixture
+def fit_plsc(sample_data):
+    data, covariates, between, within, participant = sample_data
+    plsc = pyplsc.PLSC()
+    plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
+    return plsc
+
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
-    bda = fit_bda
-    assert len(bda.get_labels()) == len(bda.design_sals_)
-    bda.permute(n_perm=20)
-    bda.bootstrap(n_boot=200)
-    yerr = bda.get_design_yerr(0)
+    assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
+    fit_bda.permute(n_perm=20)
+    fit_bda.bootstrap(n_boot=200)
+    yerr = fit_bda.get_design_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
     with pytest.raises(Exception):
-        yerr = bda.get_design_yerr([0, 1])
-    bda.transform(lv_idx=0)
-    bda.transform_design(lv_idx=0)
+        yerr = fit_bda.get_design_yerr([0, 1])
+    fit_bda.transform(lv_idx=0)
+    fit_bda.transform_design(lv_idx=0)
     with pytest.raises(Exception):
-        bda.permute(0)
+        fit_bda.permute(0)
     with pytest.raises(Exception):
-        bda.bootstrap(0)    
-    bda.bootstrap(n_boot=2, alignment_method='flip')
+        fit_bda.bootstrap(0)    
+    fit_bda.bootstrap(n_boot=2, alignment_method='flip')
     
 def test_warnings(sample_data):
     data, _, between, within, participant = sample_data
@@ -103,12 +110,39 @@ def test_bda_pre_subtract(sample_data):
     bda = pyplsc.BDA(pre_subtract='within')
     bda.fit(X=data, between=between, within=within, participant=participant)
 
-def test_plsc_basic(sample_data):
+def test_bda_input(sample_data):
+    data, _, between, within, participant = sample_data
+    design = pd.DataFrame({
+        'w': within,
+        'b': between,
+        'p': participant})
+    bda = pyplsc.BDA()
+    bda.fit(X=data, design=design,
+            between='b', within='w', participant='p')
+    bda.fit(X=data, design=design,
+            between='b', within='w', participant=participant)
+    
+
+def test_plsc_basic(fit_plsc):
+    assert len(fit_plsc.get_labels()) == len(fit_plsc.design_sals_)
+    fit_plsc.permute(n_perm=2)
+    fit_plsc.bootstrap(n_boot=2)
+    fit_plsc.transform(lv_idx=0)
+    fit_plsc.transform_design(lv_idx=0)
+    
+def test_plsc_input(sample_data):
     data, covariates, between, within, participant = sample_data
+    design = pd.DataFrame({
+        'w': within,
+        'b': between,
+        'p': participant})
     plsc = pyplsc.PLSC()
-    plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
-    assert len(plsc.get_labels()) == len(plsc.design_sals_)
-    plsc.permute(n_perm=2)
-    plsc.bootstrap(n_boot=2)
-    plsc.transform(lv_idx=0)
-    plsc.transform_design(lv_idx=0)
+    plsc.fit(X=data, design=design, covariates=covariates,
+             between='b', within='w', participant='p')
+    plsc.fit(X=data, design=design, covariates=covariates,
+             between='b', within='w', participant=participant)
+    cov_names = plsc.covariates_.columns
+    for i, name in enumerate(cov_names):
+        design[name] = covariates[:, i]
+    plsc.fit(X=data, design=design, covariates=cov_names,
+             between='b', within='w', participant='p')

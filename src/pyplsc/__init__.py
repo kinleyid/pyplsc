@@ -351,15 +351,15 @@ class PLSC(BaseClass):
     def __init__(self, svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method, random_state=random_state)
     def _setup_covariates(self, design, covariates):
-        if isinstance(design, pd.DataFrame):
-            covariates = design[covariates]
-        if isinstance(covariates, pd.DataFrame):
-            pass
-        elif isinstance(covariates, np.ndarray):
+        if isinstance(covariates, np.ndarray):
             covariates = pd.DataFrame(covariates)
             covariates.columns = ['cov%s' % col for col in covariates.columns]
         else:
-            raise ValueError('Covariates must be a DataFrame or ndarray')
+            if not isinstance(covariates, pd.DataFrame):
+                try:
+                    covariates = design[covariates]
+                except:
+                    raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
         if len(covariates) != len(self.X_):
             raise ValueError('Must be as many covariate rows as data rows')
         self.covariates_ = covariates
