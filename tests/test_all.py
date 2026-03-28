@@ -38,7 +38,8 @@ def test_bda_basic(fit_bda):
         bda.permute(0)
     with pytest.raises(Exception):
         bda.bootstrap(0)    
-
+    bda.bootstrap(n_boot=2, alignment_method='flip')
+    
 def test_warnings(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(pre_subtract='between')

@@ -5,30 +5,53 @@ from scipy.linalg import orthogonal_procrustes
 from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed
+from matplotlib import pyplot as plt
 
 from pdb import set_trace
 
 class BaseClass():
     # Parent class for PLSC and BDA
-    def __init__(self, random_state=None):
+    def __init__(self, svd_method='lapack', random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self.__perm_done = False
         self.__boot_done = False
+        self.svd_method = svd_method
         self.random_state = random_state
     def _setup_data(self, X, between, within, participant):
+        valid_X = True
+        if not isinstance(X, np.ndarray):
+            valid_X = False
+        else:
+            if not X.ndim == 2:
+                valid_X = False
+        if not valid_X:
+            raise ValueError('X must be a 2-dimensional numpy array')
         if within is not None and participant is None:
             raise ValueError('Participants must be differentiated if there is a within-participants factor')
         self.design_, sort_idx = _get_design_matrix(len(X), between, within, participant)
         self.stratifier_ = _get_stratifier(self.design_)
         self.X_ = X[sort_idx]
         return sort_idx
+    def _svd(self, M, compute_uv=True):
+        if self.svd_method == 'lapack':
+            if compute_uv:
+                u, s, v = lapack_svd(M, full_matrices=False, compute_uv=True)
+            else:
+                s = lapack_svd(M, full_matrices=False, compute_uv=False)
+        elif self.svd_method == 'randomized':
+            u, s, v = randomized_svd(M, n_components=len(M))
+        if compute_uv:
+            out = u, s, v.T
+        else:
+            out = s
+        return out
     def _initial_decomposition(self, to_factorize):
-        u, s, v = lapack_svd(to_factorize, full_matrices=False, compute_uv=True)
+        u, s, v = self._svd(to_factorize)
         self.singular_vals_ = s
         self.n_lv_ = len(s)
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
-        self.brain_sals_ = v.T
+        self.brain_sals_ = v
     def flip_signs(self, lv_idx):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
@@ -125,7 +148,7 @@ class BaseClass():
         alignment_method : string, optional
             Method to be used for aligning recomputed brain saliences with original brain saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
         svd_method : string, optional
-            Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
+            # TODO: remove Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -151,7 +174,7 @@ class BaseClass():
         boot_idxs = [self._get_resample(rng, *resample_vars)
                      for _ in range(n_boot)]
         boot_results = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method, svd_method)
+            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
         )
         design_resampled, brain_resampled = zip(*boot_results)
@@ -194,8 +217,8 @@ class BaseClass():
         return yerr
         
 class BDA(BaseClass):
-    def __init__(self, pre_subtract=None, random_state=None):
-        super().__init__(random_state)
+    def __init__(self, pre_subtract=None, svd_method='lapack', random_state=None):
+        super().__init__(svd_method=svd_method, random_state=random_state)
         self.pre_subtract = pre_subtract
     def fit(self, X, between=None, within=None, participant=None):
         # TODO: document
@@ -253,30 +276,28 @@ class BDA(BaseClass):
             design=self.design_[perm_idx],
             stratifier=self.stratifier_[perm_idx],
             pre_subtract=self.pre_subtract)
-        s = lapack_svd(mean_centred, full_matrices=False, compute_uv=False)
+        s = self._svd(mean_centred, compute_uv=False)
         return s
     def _get_resample(self, rng, *resample_vars):
         resample = _get_resample(rng, *resample_vars)
         return resample
-    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method):
+    def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         mean_centred = _get_mean_centred(
             X=self.X_[resample_idx],
             design=self.design_[resample_idx],
             stratifier=self.stratifier_[resample_idx],
             pre_subtract=self.pre_subtract)
-        s, v = _svd_and_align(to_factorize=mean_centred,
-                              target_v=self.brain_sals_,
-                              alignment_method=alignment_method,
-                              svd_method=svd_method)
+        _, s, v = self._svd(mean_centred)
+        v = _align(v, self.brain_sals_, alignment_method)
         brain_estimate = v @ np.diag(s)
         # Brain scores
         design_estimate = mean_centred @ self.brain_sals_
         return design_estimate, brain_estimate
   
 class PLSC(BaseClass):
-    def __init__(self, random_state=None):
-        super().__init__(random_state)
+    def __init__(self, svd_method='lapack', random_state=None):
+        super().__init__(svd_method=svd_method, random_state=random_state)
     def fit(self, X, covariates, between=None, within=None, participant=None):
         sort_idx = self._setup_data(X, between, within, participant)
         self.covariates_ = covariates[sort_idx]
@@ -302,7 +323,7 @@ class PLSC(BaseClass):
             self.X_,
             self.covariates_[perm_idx],
             self.stratifier_[perm_idx])
-        s = lapack_svd(R, full_matrices=False, compute_uv=False)
+        s = self._svd(R, compute_uv=False)
         return s
     def _get_resample(self, rng, *resample_vars):
         all_same = True
@@ -312,18 +333,15 @@ class PLSC(BaseClass):
             # Check for no unique observations within any level
             all_same = _validate_resample(resample, self.stratifier_)
         return resample
-    def _single_bootstrap_resample(self, resample_idx, alignment_method, svd_method):
+    def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         resampled_X = self.X_[resample_idx]
         resampled_cov = self.covariates_[resample_idx]
-        stacked_cormats = _get_stacked_cormats(
-            resampled_X,
-            resampled_cov,
-            self.stratifier_) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
-        s, v = _svd_and_align(to_factorize=stacked_cormats,
-                              target_v=self.brain_sals_,
-                              alignment_method=alignment_method,
-                              svd_method=svd_method)
+        R = _get_stacked_cormats(   resampled_X,
+                                 resampled_cov,
+                                 self.stratifier_) # Because we're resampling within levels of the stratifier, we don't need to explicitly apply the resample_idx to stratifier. stratifier[resample_idx] == stratifier, always
+        _, s, v = self._svd(R)
+        v = _align(v, self.brain_sals_, alignment_method)
         brain_estimate = v @ np.diag(s)
         # Correlation between covariates and brain scores
         design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
@@ -462,13 +480,13 @@ def _corr(X, Y):
     Xc = X - X.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
     
-    n = X.shape[0] - 1
-    stdX = np.sqrt((Xc ** 2).sum(axis=0) / n)
-    stdY = np.sqrt((Yc ** 2).sum(axis=0) / n)
+    denom = X.shape[0] - 1
+    stdX = np.sqrt((Xc ** 2).sum(axis=0) / denom)
+    stdY = np.sqrt((Yc ** 2).sum(axis=0) / denom)
     
     Xn = Xc / stdX
     Yn = Yc / stdY
-    return Xn.T @ Yn / n
+    return Xn.T @ Yn / denom
 
 def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
     # Factorize to_factorize and align with target_v
@@ -489,3 +507,15 @@ def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
         flips = np.sign(np.diag(v.T @ target_v))
         v *= flips
     return s, v
+
+def _align(v, target_v, alignment_method):
+    # Align with original decomposition
+    if alignment_method == 'rotate':
+        # Via rotation
+        R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
+        aligned = v @ R
+    elif alignment_method == 'flip':
+        # Via correcting apparent sign flips
+        flips = np.sign(np.diag(v.T @ target_v))
+        aligned = v * flips
+    return aligned
