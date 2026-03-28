@@ -56,7 +56,16 @@ class BaseClass():
             design = design[['between', 'within', 'participant']]
         self.design_ = design
         self.stratifier_ = _get_stratifier(design)
-    def _get_labels(self):
+    def get_labels(self):
+        """
+        Get the labels corresponding to each row of the design saliences. For BDA, this is the between- and within-participant condition labels. For PLSC, covariate labels are also included.
+
+        Returns
+        -------
+        labels : pandas.DataFrame
+            A dataframe with one column corresponding to each label and one row corresponding to each row of the design saliences.
+
+        """
         condition_labels = self.design_[['between','within']].drop_duplicates()
         if 'covariates_' in dir(self):
             # Create a MultiIndex from product of conditions and covariates
@@ -94,7 +103,6 @@ class BaseClass():
         self.n_lv_ = len(s)
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
-        self.labels_ = self._get_labels()
         self.brain_sals_ = v
     def flip_signs(self, lv_idx):
         """
