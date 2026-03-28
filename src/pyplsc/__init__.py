@@ -524,26 +524,6 @@ def _corr(X, Y):
     Yn = Yc / stdY
     return Xn.T @ Yn / denom
 
-def _svd_and_align(to_factorize, target_v, alignment_method, svd_method):
-    # Factorize to_factorize and align with target_v
-    if svd_method == 'lapack':
-        _, s, v = lapack_svd(to_factorize, full_matrices=False)
-    elif svd_method == 'randomized':
-        _, s, v = randomized_svd(to_factorize,
-                                 n_components=len(to_factorize),
-                                 flip_sign=False) # Don't bother, we're about to align it ourselves
-    v = v.T
-    # Align with original decomposition
-    if alignment_method == 'rotate':
-        # Via rotation
-        R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
-        v @= R
-    elif alignment_method == 'flip':
-        # Via correcting apparent sign flips
-        flips = np.sign(np.diag(v.T @ target_v))
-        v *= flips
-    return s, v
-
 def _align(v, target_v, alignment_method):
     # Align with original decomposition
     if alignment_method == 'rotate':
