@@ -9,11 +9,11 @@ from pdb import set_trace
 @pytest.fixture
 def sample_data():
     np.random.seed(123)
-    data = np.random.normal(size=(8, 2))
-    covariates = np.random.normal(size=(8, 2))
-    between = np.array([0]*4 + [1]*4)
-    within = np.array([0, 1]*4)
-    participant = np.array(np.cumsum([1, 0]*4))
+    data = np.random.normal(size=(16, 2))
+    covariates = np.random.normal(size=(16, 2))
+    between = np.array([0]*8 + [1]*8)
+    within = np.array([0, 1]*8)
+    participant = np.array(np.cumsum([1, 0]*8))
     return data, covariates, between, within, participant
 
 @pytest.fixture
@@ -33,6 +33,7 @@ def fit_plsc(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
+    set_trace()
     fit_bda.permute(n_perm=20)
     fit_bda.bootstrap(n_boot=200)
     yerr = fit_bda.get_design_yerr(0)
@@ -130,6 +131,11 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.transform(lv_idx=0)
     fit_plsc.transform_design(lv_idx=0)
     
+def test_svd_methods(sample_data):
+    data, _, between, within, participant = sample_data
+    bda = pyplsc.BDA(svd_method='randomized')
+    bda.fit(X=data, between=between)
+
 def test_plsc_input(sample_data):
     data, covariates, between, within, participant = sample_data
     design = pd.DataFrame({
@@ -146,3 +152,14 @@ def test_plsc_input(sample_data):
         design[name] = covariates[:, i]
     plsc.fit(X=data, design=design, covariates=cov_names,
              between='b', within='w', participant='p')
+
+def test_plsc_designs(sample_data):
+    data, covariates, between, within, participant = sample_data
+    plsc = pyplsc.PLSC()
+    plsc.fit(X=data, covariates=covariates)
+    plsc.permute(1)
+    plsc.bootstrap(1)
+    plsc.fit(X=data, covariates=covariates, between=between)
+    plsc.permute(1)
+    plsc.bootstrap(1)
+    plsc.fit(X=data, covariates=covariates, within=within, participant=participant)

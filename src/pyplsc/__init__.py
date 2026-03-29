@@ -28,8 +28,11 @@ class BaseClass():
             raise ValueError('data must be a 2-dimensional numpy array')
         self.X_ = X
     def _setup_design_matrix(self, design=None, between=None, within=None, participant=None):
-        if within is not None and participant is None:
-            raise ValueError('Participants must be differentiated if there is a within-participants factor')
+        if participant is None:
+            if within is not None:
+                raise ValueError('Participants must be differentiated if there is a within-participants factor')
+            else:
+                participant = np.arange(len(self.X_))
         # Assign null column of zeros if absent, otherwise assign categorical labels
         null_col = pd.Categorical([0]*len(self.X_))
         cols = {'between': between,
@@ -177,7 +180,7 @@ class BaseClass():
         # Pre-generate perm_idx
         rng = np.random.default_rng(self.random_state)
         perms = [_get_permutation(rng, self.design_)
-                 for _ in range(n_perm)]
+                 for _ in tqdm(range(n_perm), desc='Getting permutations')]
         perm_singvals = Parallel(n_jobs=n_jobs)(
             delayed(self._single_permutation)(perm)
             for perm in tqdm(perms, desc='Permuting')
@@ -223,7 +226,7 @@ class BaseClass():
         # Pre-generate bootstrap samples
         rng = np.random.default_rng(self.random_state)
         boot_idxs = [self._get_resample(rng)
-                     for _ in range(n_boot)]
+                     for _ in tqdm(range(n_boot), desc='Getting resamples')]
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
@@ -234,7 +237,8 @@ class BaseClass():
         self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
         design_resampled = np.stack(design_resampled)
-        self.bootstrap_ci_ = np.quantile(design_resampled, [(1 - confint_level)/2, confint_level/2], axis=0)
+        alpha = 1 - confint_level
+        self.bootstrap_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
         self.__boot_done = True
         return design_resampled
     def get_design_yerr(self, lv_idx):
@@ -338,7 +342,7 @@ class BDA(BaseClass):
         mean_centred = _get_mean_centred(
             X=self.X_[resample_idx],
             design=self.design_.iloc[resample_idx],
-            stratifier=self.stratifier_[resample_idx],
+            # stratifier=self.stratifier_[resample_idx],
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
         v = _align(v, self.brain_sals_, alignment_method)
@@ -392,12 +396,13 @@ class PLSC(BaseClass):
         s = self._svd(R, compute_uv=False)
         return s
     def _get_resample(self, rng):
-        all_same = True
-        while all_same:    
+        valid_resample = False
+        while not valid_resample:
             # Get indices of resample
             resample = _get_resample(rng, self.design_)
-            # Check for no unique observations within any level
-            all_same = _validate_resample(resample, self.stratifier_)
+            # Check only one unique observation within a level
+            obs_per_level = self.design_.iloc[resample].groupby(['between', 'within'])['participant'].nunique()
+            valid_resample = all(obs_per_level > 1)
         return resample
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
@@ -470,17 +475,16 @@ def _get_groupwise_means(X, group_idx):
 
 def _get_resample(rng, design):
     if design['between'].nunique() > 1:
-        # Sample participants stratufued by between factor
+        # Sample participants stratified by between factor
         ptpts_by_between = design.groupby('between')['participant'].unique()
         resampled_by_between = [rng.choice(ptpts, len(ptpts)) for ptpts in ptpts_by_between]
-        resampled_ptpts = np.concat(resampled_by_between)
+        resampled_ptpts = np.concatenate(resampled_by_between)
     else:
         # Sample participants at random
         unique_ptpts = design['participant'].unique()
         resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
-    # There is a within-participants factor
     rows_by_ptpt = design.groupby('participant').indices
-    rows = np.concat([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
+    rows = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
     return rows
 
 def _validate_resample(resample, stratifier):
