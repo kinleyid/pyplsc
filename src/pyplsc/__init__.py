@@ -152,6 +152,42 @@ class BaseClass():
             sals = sals[:, lv_idx]
         brain_scores = X @ sals
         return brain_scores
+    def _get_permutations(self, n_perm):
+        # Get indices that can be used to permute 
+        rng = np.random.default_rng(self.random_state)
+        if self.design_['within'].nunique() == 1:
+            # If no within-participants factor, just shuffle all rows
+            case = 'only-between'
+        else:
+            unshuffled_rows_by_ptpt = self.design_.groupby('participant').indices
+            if self.design_['between'].nunique() > 1:
+                case = 'between-and-within'
+            else:
+                case = 'only-within'
+        n_obs = len(self.design_)
+        perms = []
+        for perm_n in tqdm(range(n_perm), desc='Getting permutations'):
+            if case == 'only-between':
+                perm = rng.permutation(n_obs)
+            else:
+                # There is a within-participants factor
+                # Create a copy to shuffle
+                rows_by_ptpt = unshuffled_rows_by_ptpt.copy()
+                # Shuffle within-participant condition
+                for rows in rows_by_ptpt.values():
+                    rng.shuffle(rows)
+                if case == 'between-and-within':
+                    # If there is a between-participants cond, shuffle which set of rows (and hence which between-participants condition) is assigned to each participant
+                    # (This is just shuffling mapping between dict keys and values)
+                    ptpts, row_sets = zip(*rows_by_ptpt.items())
+                    row_sets = rng.permutation(row_sets)
+                    rows_by_ptpt = dict(zip(ptpts, row_sets))
+                # Assign new rows to participants
+                perm = np.zeros((n_obs,), dtype=np.int64)
+                for ptpt, rows in rows_by_ptpt.items():
+                    perm[unshuffled_rows_by_ptpt[ptpt]] = rows
+            perms.append(perm)
+        return perms
     def permute(self, n_perm=5000, return_null_dist=False, n_jobs=1):
         """
         Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the pvals_ property.
@@ -180,9 +216,7 @@ class BaseClass():
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
         # Pre-generate perm_idx
-        rng = np.random.default_rng(self.random_state)
-        perms = [_get_permutation(rng, self.design_)
-                 for _ in tqdm(range(n_perm), desc='Getting permutations')]
+        perms = self._get_permutations(n_perm)
         perm_singvals = Parallel(n_jobs=n_jobs)(
             delayed(self._single_permutation)(perm)
             for perm in tqdm(perms, desc='Permuting')
@@ -230,8 +264,11 @@ class BaseClass():
         # Get variables needed for bootstrapping
         # Pre-generate bootstrap samples
         rng = np.random.default_rng(self.random_state)
+        """
         boot_idxs = [self._get_resample(rng)
                      for _ in tqdm(range(n_boot), desc='Getting resamples')]
+        """
+        boot_idxs = self._get_resamples(n_boot)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
@@ -339,9 +376,13 @@ class BDA(BaseClass):
             pre_subtract=self.pre_subtract)
         s = self._svd(mean_centred, compute_uv=False)
         return s
-    def _get_resample(self, rng):
-        resample = _get_resample(rng, self.design_)
-        return resample
+    def _get_resamples(self, n_boot):
+        rng = np.random.default_rng(self.random_state)
+        resamples = []
+        for boot_n in tqdm(range(n_boot), desc='Getting resamples'):
+            resample = _get_resample(rng, self.design_)
+            resamples.append(resample)
+        return resamples
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         mean_centred = _get_mean_centred(
@@ -426,27 +467,42 @@ class PLSC(BaseClass):
                                                resampled_strat)
         return design_estimate, brain_estimate
 
-def _get_permutation(rng, design):
+def _get_permutation(rng, design, n_perm=1):
     if design['within'].nunique() == 1:
         # If no within-participants factor, just shuffle all rows
-        perm = rng.permutation(len(design))
+        case = 'only-between'
     else:
-        # There is a within-participants factor
-        rows_by_ptpt = design.groupby('participant').indices
-        # Shuffle within-participant condition
-        for rows in rows_by_ptpt.values():
-            rng.shuffle(rows)
+        unshuffled_rows_by_ptpt = design.groupby('participant').indices
         if design['between'].nunique() > 1:
-            # If there is a between-participants cond, shuffle which set of rows (and hence which between-participants condition) is assigned to each participant
-            # (This is just shuffling mapping between dict keys and values)
-            ptpts, row_sets = zip(*rows_by_ptpt.items())
-            row_sets = rng.permutation(row_sets)
-            rows_by_ptpt = dict(zip(ptpts, row_sets))
-        # Assign new rows to participants
-        perm = np.zeros((len(design),), dtype=np.int64)
-        for ptpt, rows in rows_by_ptpt.items():
-            perm[design['participant'] == ptpt] = rows
-    return perm
+            case = 'between-and-within'
+        else:
+            case = 'only-within'
+    n_obs = len(design)
+    perms = []
+    for perm_n in range(n_perm):
+        if case == 'only-between':
+            perm = rng.permutation(n_obs)
+        else:
+            # There is a within-participants factor
+            rows_by_ptpt = unshuffled_rows_by_ptpt.copy()
+            # Shuffle within-participant condition
+            for rows in rows_by_ptpt.values():
+                rng.shuffle(rows)
+            if case == 'between-and-within':
+                # If there is a between-participants cond, shuffle which set of rows (and hence which between-participants condition) is assigned to each participant
+                # (This is just shuffling mapping between dict keys and values)
+                ptpts, row_sets = zip(*rows_by_ptpt.items())
+                row_sets = rng.permutation(row_sets)
+                rows_by_ptpt = dict(zip(ptpts, row_sets))
+            # Assign new rows to participants
+            perm = np.zeros((n_obs,), dtype=np.int64)
+            for ptpt, rows in rows_by_ptpt.items():
+                perm[unshuffled_rows_by_ptpt[ptpt]] = rows
+                # perm[design['participant'] == ptpt] = rows
+        perms.append(perm)
+    if n_perm == 1:
+        perms = perms[0]
+    return perms
 
 def _get_stratifier(design):
     # Get unique combinations of between and within factors
