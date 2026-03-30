@@ -33,7 +33,6 @@ def fit_plsc(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
-    set_trace()
     fit_bda.permute(n_perm=20)
     fit_bda.bootstrap(n_boot=200)
     yerr = fit_bda.get_design_yerr(0)
