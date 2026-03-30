@@ -58,7 +58,7 @@ class BaseClass():
                     design[colname] = pd.Categorical(col)
             design = design[['between', 'within', 'participant']]
         self.design_ = design
-        self.stratifier_ = _get_stratifier(design)
+        self.stratifier_ = _get_stratifier(design) # This is handy to pre-compute because it's used many times later on
     def get_labels(self):
         """
         Get the labels corresponding to each row of the design saliences. For BDA, this is the between- and within-participant condition labels. For PLSC, covariate labels are also included.
@@ -227,6 +227,40 @@ class BaseClass():
         self.__perm_done = True
         if return_null_dist:
             return null_dist
+    def _get_resamples_new(self, n_boot, validate=False):
+        rng = np.random.default_rng(self.random_state)
+        rows_by_ptpt = self.design_.groupby('participant').indices
+        if self.design_['between'].nunique() > 1:
+            case = 'between'
+            ptpts_by_between = self.design_.groupby('between')['participant'].unique()
+        else:
+            case = 'no-between'
+            unique_ptpts = self.design_['participant'].unique()
+        if validate:
+            strat_levels = np.unique(self.stratifier_)
+            ptpts = self.design_['participant'].to_numpy()
+        resamples = []
+        for boot_n in tqdm(range(n_boot)):
+            validated = False
+            while not validated:
+                if case == 'between':
+                    # Sample participants stratified by between factor
+                    resampled_by_between = [rng.choice(ptpts, len(ptpts)) for ptpts in ptpts_by_between]
+                    resampled_ptpts = np.concatenate(resampled_by_between)
+                else:
+                    # Sample participants at random
+                    resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
+                resample = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
+                if validate:
+                    # Check for levels with only one participant
+                    resampled_strat = self.stratifier_[resample]
+                    resampled_ptpts = ptpts[resample]
+                    validated = all([len(np.unique(resampled_ptpts[resampled_strat == lvl])) > 1
+                                     for lvl in strat_levels])
+                else:
+                    validated = True
+            resamples.append(resample)
+        return resamples
     def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', svd_method='lapack', return_boot_dist=False, n_jobs=1):
         """
         Perform bootstrap resampling to assess the reliability of saliences.
@@ -268,7 +302,7 @@ class BaseClass():
         boot_idxs = [self._get_resample(rng)
                      for _ in tqdm(range(n_boot), desc='Getting resamples')]
         """
-        boot_idxs = self._get_resamples(n_boot)
+        boot_idxs = self._get_resamples_new(n_boot, validate=self._validate_resamples)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
@@ -317,6 +351,7 @@ class BDA(BaseClass):
     def __init__(self, pre_subtract=None, svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method, random_state=random_state)
         self.pre_subtract = pre_subtract
+        self._validate_resamples = False
     def fit(self, X, design=None, between=None, within=None, participant=None):
         # TODO: document
         if between is None and within is None:
@@ -400,6 +435,7 @@ class BDA(BaseClass):
 class PLSC(BaseClass):
     def __init__(self, svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method, random_state=random_state)
+        self._validate_resamples = True
     def _setup_covariates(self, design, covariates):
         if isinstance(covariates, np.ndarray):
             covariates = pd.DataFrame(covariates)
