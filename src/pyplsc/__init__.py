@@ -11,10 +11,11 @@ from pdb import set_trace
 
 class BaseClass():
     # Parent class for PLSC and BDA
-    def __init__(self, svd_method='lapack', random_state=None):
+    def __init__(self, svd_method='lapack', random_state=None, validate_resamples=False):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self.__perm_done = False
         self.__boot_done = False
+        self.__validate_resamples = validate_resamples
         self.svd_method = svd_method
         self.random_state = random_state
     def _setup_data(self, X):
@@ -297,12 +298,11 @@ class BaseClass():
         self.confint_level_ = confint_level
         # Get variables needed for bootstrapping
         # Pre-generate bootstrap samples
-        rng = np.random.default_rng(self.random_state)
         """
         boot_idxs = [self._get_resample(rng)
                      for _ in tqdm(range(n_boot), desc='Getting resamples')]
         """
-        boot_idxs = self._get_resamples_new(n_boot, validate=self._validate_resamples)
+        boot_idxs = self._get_resamples_new(n_boot, validate=self.__validate_resamples)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
@@ -349,9 +349,10 @@ class BaseClass():
         
 class BDA(BaseClass):
     def __init__(self, pre_subtract=None, svd_method='lapack', random_state=None):
-        super().__init__(svd_method=svd_method, random_state=random_state)
+        super().__init__(svd_method=svd_method,
+                         random_state=random_state,
+                         validate_resamples=False)
         self.pre_subtract = pre_subtract
-        self._validate_resamples = False
     def fit(self, X, design=None, between=None, within=None, participant=None):
         # TODO: document
         if between is None and within is None:
@@ -434,8 +435,9 @@ class BDA(BaseClass):
   
 class PLSC(BaseClass):
     def __init__(self, svd_method='lapack', random_state=None):
-        super().__init__(svd_method=svd_method, random_state=random_state)
-        self._validate_resamples = True
+        super().__init__(svd_method=svd_method,
+                         random_state=random_state,
+                         validate_resamples=True)
     def _setup_covariates(self, design, covariates):
         if isinstance(covariates, np.ndarray):
             covariates = pd.DataFrame(covariates)
