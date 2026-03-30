@@ -152,7 +152,7 @@ class BaseClass():
             sals = sals[:, lv_idx]
         brain_scores = X @ sals
         return brain_scores
-    def permute(self, n_perm=5000, n_jobs=1):
+    def permute(self, n_perm=5000, return_null_dist=False, n_jobs=1):
         """
         Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the pvals_ property.
 
@@ -160,6 +160,8 @@ class BaseClass():
         ----------
         n_perm : int, optional
             Number of permutations t operform. The default is 5000.
+        return_null_dist : bool, optional
+            If true, permutation samples will be returned.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -189,8 +191,9 @@ class BaseClass():
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
         self.__perm_done = True
-        return null_dist
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', svd_method='lapack', n_jobs=1):
+        if return_null_dist:
+            return null_dist
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', svd_method='lapack', return_boot_dist=False, n_jobs=1):
         """
         Perform bootstrap resampling to assess the reliability of saliences.
 
@@ -204,6 +207,8 @@ class BaseClass():
             Method to be used for aligning recomputed brain saliences with original brain saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
         svd_method : string, optional
             # TODO: remove Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
+        return_boot_dist : bool, optional
+            # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
