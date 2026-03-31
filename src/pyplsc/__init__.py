@@ -378,31 +378,10 @@ class BDA(BaseClass):
             design=self.design_,
             pre_subtract=self.pre_subtract)
         self._initial_decomposition(mean_centred)
+        # Compute design scores
+        self.design_scores_ = self.design_sals_[self.stratifier_]
         self.design_stat_ = mean_centred @ self.brain_sals_ # Score per barycentre
         return self
-    def transform_design(self, Y=None, lv_idx=None):
-        """
-        Compute design scores
-
-        Parameters
-        ----------
-        Y : numpy.ndarray, optional
-            # TODO: explain. The default is None.
-        lv_idx : index, optional
-
-        Returns
-        -------
-        design_scores : numpy.ndarray
-            A 2D array of design scores where rows correspond to different observations and columns correspond to different latent variables.
-
-        """
-        if Y is None:
-            Y = self.stratifier_
-        sals = self.design_sals_
-        if lv_idx is not None:
-            sals = sals[:, lv_idx]
-        design_scores = sals[Y]
-        return design_scores
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
         mean_centred = _get_mean_centred(
@@ -451,6 +430,21 @@ class PLSC(BaseClass):
         if len(covariates) != len(self.X_):
             raise ValueError('Must be as many covariate rows as data rows')
         self.covariates_ = covariates
+    def _get_design_scores(self):
+        # Initialize
+        design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
+        # Align the observationsn with the design saliences, level-wises
+        sal_labels = self.get_labels()
+        sal_levels = _get_stratifier(sal_labels, output='tuples')
+        obs_levels = _get_stratifier(self.design_, output='tuples')
+        for curr_lvl in set(obs_levels):
+            obs_mask = [i for i, obs_lvl in enumerate(obs_levels) if obs_lvl == curr_lvl]
+            sal_mask = [i for i, sal_lvl in enumerate(sal_levels) if sal_lvl == curr_lvl]
+            obs_submat = self.covariates_.to_numpy()[obs_mask]
+            sal_submat = self.design_sals_[sal_mask]
+            # Ensure each covariate is being multiplied by the appropriate salience
+            assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
+            design_scores[obs_mask] = obs_submat @ sal_submat
     def fit(self, X, covariates, design=None, between=None, within=None, participant=None):
         self._setup_data(X)
         self._setup_design_matrix(design, between, within, participant)
@@ -460,18 +454,12 @@ class PLSC(BaseClass):
             self.covariates_,
             self.stratifier_)
         self._initial_decomposition(R)
+        self.design_scores_ = self._get_design_scores()
         # Correlation between brain scores and covariates
         brain_scores = self.transform()
         self.design_stat_ = _get_stacked_cormats(brain_scores,
                                                  self.covariates_,
                                                  self.stratifier_)
-    def transform_design(self, Y=None, lv_idx=None):
-        if Y is None:
-            Y = self.covariates_
-        sals = self.design_sals_
-        if lv_idx is not None:
-            sals = sals[:, lv_idx]
-        return Y.T @ sals
     def _single_permutation(self, perm_idx):
         R = _get_stacked_cormats(
             self.X_,
@@ -542,9 +530,13 @@ def _get_permutation(rng, design, n_perm=1):
         perms = perms[0]
     return perms
 
-def _get_stratifier(design):
+def _get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors
-    stratifier, _ = pd.MultiIndex.from_frame(design[['between', 'within']]).factorize()
+    multi_idx = pd.MultiIndex.from_frame(design[['between', 'within']])
+    if output == 'ints':
+        stratifier, _ = multi_idx.factorize()
+    elif output == 'tuples':
+        stratifier = multi_idx.to_list()
     return stratifier
 
 def _pre_centre(X, design, pre_subtract):

@@ -41,7 +41,6 @@ def test_bda_basic(fit_bda):
     with pytest.raises(Exception):
         yerr = fit_bda.get_design_yerr([0, 1])
     fit_bda.transform(lv_idx=0)
-    fit_bda.transform_design(lv_idx=0)
     with pytest.raises(Exception):
         fit_bda.permute(0)
     with pytest.raises(Exception):
@@ -121,15 +120,13 @@ def test_bda_input(sample_data):
             between='b', within='w', participant='p')
     bda.fit(X=data, design=design,
             between='b', within='w', participant=participant)
-    
 
 def test_plsc_basic(fit_plsc):
     assert len(fit_plsc.get_labels()) == len(fit_plsc.design_sals_)
     fit_plsc.permute(n_perm=2)
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
-    fit_plsc.transform_design(lv_idx=0)
-    
+
 def test_svd_methods(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(svd_method='randomized')
@@ -156,9 +153,9 @@ def test_plsc_designs(sample_data):
     data, covariates, between, within, participant = sample_data
     plsc = pyplsc.PLSC()
     plsc.fit(X=data, covariates=covariates)
-    plsc.permute(1)
-    plsc.bootstrap(1)
+    plsc.permute(10)
+    plsc.bootstrap(10)
     plsc.fit(X=data, covariates=covariates, between=between)
-    plsc.permute(1)
-    plsc.bootstrap(1)
+    plsc.permute(10)
+    plsc.bootstrap(10)
     plsc.fit(X=data, covariates=covariates, within=within, participant=participant)
