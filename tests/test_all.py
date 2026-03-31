@@ -20,14 +20,14 @@ def sample_data():
 def fit_bda(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(random_state=123)
-    bda.fit(X=data, between=between, within=within, participant=participant)
+    bda.fit(data=data, between=between, within=within, participant=participant)
     return bda
 
 @pytest.fixture
 def fit_plsc(sample_data):
     data, covariates, between, within, participant = sample_data
     plsc = pyplsc.PLSC()
-    plsc.fit(X=data, covariates=covariates, between=between, within=within, participant=participant)
+    plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
     return plsc
 
 def test_bda_basic(fit_bda):
@@ -85,11 +85,11 @@ def test_errors(sample_data):
 
 def test_flips(fit_bda):
     fit_bda.bootstrap(n_boot=2)
-    sals_1 = fit_bda.brain_sals_[:, 0].copy()
-    recon_1 = fit_bda.design_sals_ @ fit_bda.brain_sals_.T
+    sals_1 = fit_bda.data_sals_[:, 0].copy()
+    recon_1 = fit_bda.design_sals_ @ fit_bda.data_sals_.T
     fit_bda.flip_signs(0)
-    sals_2 = fit_bda.brain_sals_[:, 0]
-    recon_2 = fit_bda.design_sals_ @ fit_bda.brain_sals_.T
+    sals_2 = fit_bda.data_sals_[:, 0]
+    recon_2 = fit_bda.design_sals_ @ fit_bda.data_sals_.T
     assert np.isclose(sals_1, -sals_2).all()
     assert np.isclose(recon_1, recon_2).all()
 
@@ -105,9 +105,9 @@ def test_bda_rng(fit_bda):
 def test_bda_pre_subtract(sample_data):
     data, covariates, between, within, participant = sample_data
     bda = pyplsc.BDA(pre_subtract='between')
-    bda.fit(X=data, between=between, within=within, participant=participant)
+    bda.fit(data=data, between=between, within=within, participant=participant)
     bda = pyplsc.BDA(pre_subtract='within')
-    bda.fit(X=data, between=between, within=within, participant=participant)
+    bda.fit(data=data, between=between, within=within, participant=participant)
 
 def test_bda_input(sample_data):
     data, _, between, within, participant = sample_data
@@ -116,9 +116,9 @@ def test_bda_input(sample_data):
         'b': between,
         'p': participant})
     bda = pyplsc.BDA()
-    bda.fit(X=data, design=design,
+    bda.fit(data=data, design=design,
             between='b', within='w', participant='p')
-    bda.fit(X=data, design=design,
+    bda.fit(data=data, design=design,
             between='b', within='w', participant=participant)
 
 def test_plsc_basic(fit_plsc):
@@ -130,7 +130,7 @@ def test_plsc_basic(fit_plsc):
 def test_svd_methods(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(svd_method='randomized')
-    bda.fit(X=data, between=between)
+    bda.fit(data=data, between=between)
 
 def test_plsc_input(sample_data):
     data, covariates, between, within, participant = sample_data
@@ -139,23 +139,23 @@ def test_plsc_input(sample_data):
         'b': between,
         'p': participant})
     plsc = pyplsc.PLSC()
-    plsc.fit(X=data, design=design, covariates=covariates,
+    plsc.fit(data=data, design=design, covariates=covariates,
              between='b', within='w', participant='p')
-    plsc.fit(X=data, design=design, covariates=covariates,
+    plsc.fit(data=data, design=design, covariates=covariates,
              between='b', within='w', participant=participant)
     cov_names = plsc.covariates_.columns
     for i, name in enumerate(cov_names):
         design[name] = covariates[:, i]
-    plsc.fit(X=data, design=design, covariates=cov_names,
+    plsc.fit(data=data, design=design, covariates=cov_names,
              between='b', within='w', participant='p')
 
 def test_plsc_designs(sample_data):
     data, covariates, between, within, participant = sample_data
     plsc = pyplsc.PLSC()
-    plsc.fit(X=data, covariates=covariates)
+    plsc.fit(data=data, covariates=covariates)
     plsc.permute(10)
     plsc.bootstrap(10)
-    plsc.fit(X=data, covariates=covariates, between=between)
+    plsc.fit(data=data, covariates=covariates, between=between)
     plsc.permute(10)
     plsc.bootstrap(10)
-    plsc.fit(X=data, covariates=covariates, within=within, participant=participant)
+    plsc.fit(data=data, covariates=covariates, within=within, participant=participant)

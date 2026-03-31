@@ -18,24 +18,24 @@ class BaseClass():
         self.__validate_resamples = validate_resamples
         self.svd_method = svd_method
         self.random_state = random_state
-    def _setup_data(self, X):
-        valid_X = True
-        if not isinstance(X, np.ndarray):
-            valid_X = False
+    def _setup_data(self, data):
+        valid_data = True
+        if not isinstance(data, np.ndarray):
+            valid_data = False
         else:
-            if not X.ndim == 2:
-                valid_X = False
-        if not valid_X:
+            if not data.ndim == 2:
+                valid_data = False
+        if not valid_data:
             raise ValueError('data must be a 2-dimensional numpy array')
-        self.X_ = X
+        self.data_ = data
     def _setup_design_matrix(self, design=None, between=None, within=None, participant=None):
         if participant is None:
             if within is not None:
                 raise ValueError('Participants must be differentiated if there is a within-participants factor')
             else:
-                participant = np.arange(len(self.X_))
+                participant = np.arange(len(self.data_))
         # Assign null column of zeros if absent, otherwise assign categorical labels
-        null_col = pd.Categorical([0]*len(self.X_))
+        null_col = pd.Categorical([0]*len(self.data_))
         cols = {'between': between,
                 'within': within,
                 'participant': participant}
@@ -107,7 +107,7 @@ class BaseClass():
         self.n_lv_ = len(s)
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
-        self.brain_sals_ = v
+        self.data_sals_ = v
     def flip_signs(self, lv_idx=None):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
@@ -125,36 +125,36 @@ class BaseClass():
         if lv_idx is None:
             lv_idx = range(self.n_lv_)
         self.design_sals_[:, lv_idx] *= -1
-        self.brain_sals_[:, lv_idx] *= -1
+        self.data_sals_[:, lv_idx] *= -1
         self.design_stat_[:, lv_idx] *= -1
         if self.__boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
             self.bootstrap_ci_[..., lv_idx] *= -1
             self.bootstrap_ci_ = self.bootstrap_ci_[(1, 0), ...]
-    def transform(self, X=None, lv_idx=None):
+    def transform(self, data=None, lv_idx=None):
         """
-        Compute brain scores---i.e., coordinates of brain data in the new basis defined by the latent variables.
+        Compute scores---i.e., coordinates of data in the new basis defined by the latent variables.
 
         Parameters
         ----------
-        X : numpy.ndarray, optional
-            Brain data to transform. The default is None, which yields brain scores for the data on which the model was fit.
+        data : numpy.ndarray, optional
+            Data to transform. The default is None, which yields scores for the data on which the model was fit.
         lv_idx : index, optional
-            Index of latent variable(s) for which to compute brain scores. Default is None, which computes brain scores for all latent variables.
+            Index of latent variable(s) for which to compute scores. Default is None, which computes scores for all latent variables.
 
         Returns
         -------
-        brain_scores : numpy.ndarray
-            A 2D array of brain scores where rows correspond to different observations and columns correspond to different latent variables.
+        data_scores : numpy.ndarray
+            A 2D array of scores where rows correspond to different observations and columns correspond to different latent variables.
 
         """
-        if X is None:
-            X = self.X_
-        sals = self.brain_sals_
+        if data is None:
+            data = self.data_
+        sals = self.data_sals_
         if lv_idx is not None:
             sals = sals[:, lv_idx]
-        brain_scores = X @ sals
-        return brain_scores
+        data_scores = data @ sals
+        return data_scores
     def _get_permutations(self, n_perm):
         # Get indices that can be used to permute 
         rng = np.random.default_rng(self.random_state)
@@ -275,7 +275,7 @@ class BaseClass():
         confint_level : float, optional
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
-            Method to be used for aligning recomputed brain saliences with original brain saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
+            Method to be used for aligning recomputed data saliences with original data saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
         svd_method : string, optional
             # TODO: remove Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
         return_boot_dist : bool, optional
@@ -312,10 +312,10 @@ class BaseClass():
         )'''
         boot_results = [self._single_bootstrap_resample(boot_idx, alignment_method)
                         for boot_idx in tqdm(boot_idxs, desc="Resampling")]
-        design_resampled, brain_resampled = zip(*boot_results)
-        # Compute standard deviations for brain saliences to get bootstrap ratios
-        stds = np.stack(brain_resampled).std(axis=0)
-        self.bootstrap_ratios_ = (self.brain_sals_ @ np.diag(self.singular_vals_)) / stds
+        design_resampled, data_resampled = zip(*boot_results)
+        # Compute standard deviations for data saliences to get bootstrap ratios
+        stds = np.stack(data_resampled).std(axis=0)
+        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute confidence intervals for design saliences
         design_resampled = np.stack(design_resampled)
         alpha = 1 - confint_level
@@ -359,7 +359,7 @@ class BDA(BaseClass):
                          random_state=random_state,
                          validate_resamples=False)
         self.pre_subtract = pre_subtract
-    def fit(self, X, design=None, between=None, within=None, participant=None):
+    def fit(self, data, design=None, between=None, within=None, participant=None):
         # TODO: document
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
@@ -374,25 +374,25 @@ class BDA(BaseClass):
                     raise ValueError('Pre-subtracting within-participant condition means is not possible when no within-participant condition is definted')
                 if between is None:
                     raise Warning('No effect of within-participant condition will be detectable if within-participant condition means are pre-subtracted and no between-participant condition is defined.')
-        self._setup_data(X)
+        self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         if len(np.unique(self.stratifier_)) == 1:
             raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
         # TODO: enforce one between condition per participant
         mean_centred = _get_mean_centred(
-            X=self.X_,
+            data=self.data_,
             design=self.design_,
             stratifier=self.stratifier_,
             pre_subtract=self.pre_subtract)
         self._initial_decomposition(mean_centred)
         # Compute design scores
         self.design_scores_ = self.design_sals_[self.stratifier_]
-        self.design_stat_ = mean_centred @ self.brain_sals_ # Score per barycentre
+        self.design_stat_ = mean_centred @ self.data_sals_ # Score per barycentre
         return self
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
         mean_centred = _get_mean_centred(
-            X=self.X_,
+            data=self.data_,
             design=self.design_.iloc[perm_idx],
             stratifier=self.stratifier_[perm_idx],
             pre_subtract=self.pre_subtract)
@@ -401,16 +401,16 @@ class BDA(BaseClass):
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         mean_centred = _get_mean_centred(
-            X=self.X_[resample_idx],
+            data=self.data_[resample_idx],
             design=self.design_.iloc[resample_idx],
             stratifier=self.stratifier_[resample_idx],
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
-        v = _align(v, self.brain_sals_, alignment_method)
-        brain_estimate = v @ np.diag(s)
+        v = _align(v, self.data_sals_, alignment_method)
+        data_estimate = v @ np.diag(s)
         # Brain scores
-        design_estimate = mean_centred @ self.brain_sals_
-        return design_estimate, brain_estimate
+        design_estimate = mean_centred @ self.data_sals_
+        return design_estimate, data_estimate
   
 class PLSC(BaseClass):
     def __init__(self, svd_method='lapack', random_state=None):
@@ -427,7 +427,7 @@ class PLSC(BaseClass):
                     covariates = design[covariates]
                 except:
                     raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
-        if len(covariates) != len(self.X_):
+        if len(covariates) != len(self.data_):
             raise ValueError('Must be as many covariate rows as data rows')
         self.covariates_ = covariates
     def _get_design_scores(self):
@@ -445,44 +445,44 @@ class PLSC(BaseClass):
             # Ensure each covariate is being multiplied by the appropriate salience
             assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
             design_scores[obs_mask] = obs_submat @ sal_submat
-    def fit(self, X, covariates, design=None, between=None, within=None, participant=None):
-        self._setup_data(X)
+    def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
+        self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
         R = _get_stacked_cormats(
-            self.X_,
+            self.data_,
             self.covariates_,
             self.stratifier_)
         self._initial_decomposition(R)
         self.design_scores_ = self._get_design_scores()
-        # Correlation between brain scores and covariates
-        brain_scores = self.transform()
-        self.design_stat_ = _get_stacked_cormats(brain_scores,
+        # Correlation between data scores and covariates
+        data_scores = self.transform()
+        self.design_stat_ = _get_stacked_cormats(data_scores,
                                                  self.covariates_,
                                                  self.stratifier_)
     def _single_permutation(self, perm_idx):
         R = _get_stacked_cormats(
-            self.X_,
+            self.data_,
             self.covariates_.iloc[perm_idx],
             self.stratifier_[perm_idx])
         s = self._svd(R, compute_uv=False)
         return s
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
-        resampled_X = self.X_[resample_idx]
+        resampled_data = self.data_[resample_idx]
         resampled_cov = self.covariates_.iloc[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
-        R = _get_stacked_cormats(resampled_X,
+        R = _get_stacked_cormats(resampled_data,
                                  resampled_cov,
                                  resampled_strat)
         _, s, v = self._svd(R)
-        v = _align(v, self.brain_sals_, alignment_method)
-        brain_estimate = v @ np.diag(s)
-        # Correlation between covariates and brain scores
-        design_estimate = _get_stacked_cormats(resampled_X @ self.brain_sals_, # Brain scores
+        v = _align(v, self.data_sals_, alignment_method)
+        data_estimate = v @ np.diag(s)
+        # Correlation between covariates and data scores
+        design_estimate = _get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
                                                resampled_cov,
                                                resampled_strat)
-        return design_estimate, brain_estimate
+        return design_estimate, data_estimate
 
 def _get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors
@@ -493,53 +493,53 @@ def _get_stratifier(design, output='ints'):
         stratifier = multi_idx.to_list()
     return stratifier
 
-def _pre_centre(X, design, pre_subtract):
+def _pre_centre(data, design, pre_subtract):
     # Pre-subtract between- or within-wise means if applicable
     group_idx = design[pre_subtract]
-    rowwise_group_means = _get_groupwise_means(X, group_idx)[group_idx]
-    return X - rowwise_group_means
+    rowwise_group_means = _get_groupwise_means(data, group_idx)[group_idx]
+    return data - rowwise_group_means
 
-def _get_mean_centred(X, design, stratifier=None, pre_subtract=None):
+def _get_mean_centred(data, design, stratifier=None, pre_subtract=None):
     if pre_subtract is not None:
-        X = _pre_centre(X, design, pre_subtract)
+        data = _pre_centre(data, design, pre_subtract)
     # Compute group-wise means
     if stratifier is None: # Might not be pre-computed
         stratifier = _get_stratifier(design)
-    groupwise_means = _get_groupwise_means(X, stratifier)
+    groupwise_means = _get_groupwise_means(data, stratifier)
     # Mean centre
     mean_centred = groupwise_means - groupwise_means.mean(axis=0)
     return mean_centred
 
-def _get_groupwise_means(X, group_idx):
+def _get_groupwise_means(data, group_idx):
     groups = np.unique(group_idx)
     # Pre-allocate memory
-    groupwise_means = np.zeros((len(groups), X.shape[1]), dtype=X.dtype)
+    groupwise_means = np.zeros((len(groups), data.shape[1]), dtype=data.dtype)
     for group in groups:
-        groupwise_means[group] = X[group_idx == group].mean(axis=0)
+        groupwise_means[group] = data[group_idx == group].mean(axis=0)
     return groupwise_means
 
-def _get_stacked_cormats(X, covariates, stratifier):
+def _get_stacked_cormats(data, covariates, stratifier):
     submatrices = []
     n_levels = stratifier.max() + 1
     for level in range(n_levels):
         idx = stratifier == level
-        submatrix = _corr(covariates[idx], X[idx])
+        submatrix = _corr(covariates[idx], data[idx])
         submatrices.append(submatrix)
     R = np.concat(submatrices)
     return R
 
-def _corr(X, Y):
-    # Compute a rectangular correlation matrix between X and Y
-    Xc = X - X.mean(axis=0)
+def _corr(data, Y):
+    # Compute a rectangular correlation matrix between data and Y
+    datac = data - data.mean(axis=0)
     Yc = Y - Y.mean(axis=0)
     
-    denom = X.shape[0] - 1
-    stdX = np.sqrt((Xc ** 2).sum(axis=0) / denom)
+    denom = data.shape[0] - 1
+    stddata = np.sqrt((datac ** 2).sum(axis=0) / denom)
     stdY = np.sqrt((Yc ** 2).sum(axis=0) / denom)
     
-    Xn = Xc / stdX
+    datan = datac / stddata
     Yn = Yc / stdY
-    return Xn.T @ Yn / denom
+    return datan.T @ Yn / denom
 
 def _align(v, target_v, alignment_method):
     # Align with original decomposition
