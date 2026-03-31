@@ -228,7 +228,7 @@ class BaseClass():
         self.__perm_done = True
         if return_null_dist:
             return null_dist
-    def _get_resamples_new(self, n_boot, validate=False):
+    def _get_resamples(self, n_boot, validate=False):
         rng = np.random.default_rng(self.random_state)
         rows_by_ptpt = self.design_.groupby('participant').indices
         if self.design_['between'].nunique() > 1:
@@ -302,7 +302,7 @@ class BaseClass():
         boot_idxs = [self._get_resample(rng)
                      for _ in tqdm(range(n_boot), desc='Getting resamples')]
         """
-        boot_idxs = self._get_resamples_new(n_boot, validate=self.__validate_resamples)
+        boot_idxs = self._get_resamples(n_boot, validate=self.__validate_resamples)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
@@ -391,13 +391,6 @@ class BDA(BaseClass):
             pre_subtract=self.pre_subtract)
         s = self._svd(mean_centred, compute_uv=False)
         return s
-    def _get_resamples(self, n_boot):
-        rng = np.random.default_rng(self.random_state)
-        resamples = []
-        for boot_n in tqdm(range(n_boot), desc='Getting resamples'):
-            resample = _get_resample(rng, self.design_)
-            resamples.append(resample)
-        return resamples
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         mean_centred = _get_mean_centred(
@@ -467,15 +460,6 @@ class PLSC(BaseClass):
             self.stratifier_[perm_idx])
         s = self._svd(R, compute_uv=False)
         return s
-    def _get_resample(self, rng):
-        valid_resample = False
-        while not valid_resample:
-            # Get indices of resample
-            resample = _get_resample(rng, self.design_)
-            # Check only one unique observation within a level
-            obs_per_level = self.design_.iloc[resample].groupby(['between', 'within'])['participant'].nunique()
-            valid_resample = all(obs_per_level > 1)
-        return resample
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         resampled_X = self.X_[resample_idx]
@@ -492,43 +476,6 @@ class PLSC(BaseClass):
                                                resampled_cov,
                                                resampled_strat)
         return design_estimate, brain_estimate
-
-def _get_permutation(rng, design, n_perm=1):
-    if design['within'].nunique() == 1:
-        # If no within-participants factor, just shuffle all rows
-        case = 'only-between'
-    else:
-        unshuffled_rows_by_ptpt = design.groupby('participant').indices
-        if design['between'].nunique() > 1:
-            case = 'between-and-within'
-        else:
-            case = 'only-within'
-    n_obs = len(design)
-    perms = []
-    for perm_n in range(n_perm):
-        if case == 'only-between':
-            perm = rng.permutation(n_obs)
-        else:
-            # There is a within-participants factor
-            rows_by_ptpt = unshuffled_rows_by_ptpt.copy()
-            # Shuffle within-participant condition
-            for rows in rows_by_ptpt.values():
-                rng.shuffle(rows)
-            if case == 'between-and-within':
-                # If there is a between-participants cond, shuffle which set of rows (and hence which between-participants condition) is assigned to each participant
-                # (This is just shuffling mapping between dict keys and values)
-                ptpts, row_sets = zip(*rows_by_ptpt.items())
-                row_sets = rng.permutation(row_sets)
-                rows_by_ptpt = dict(zip(ptpts, row_sets))
-            # Assign new rows to participants
-            perm = np.zeros((n_obs,), dtype=np.int64)
-            for ptpt, rows in rows_by_ptpt.items():
-                perm[unshuffled_rows_by_ptpt[ptpt]] = rows
-                # perm[design['participant'] == ptpt] = rows
-        perms.append(perm)
-    if n_perm == 1:
-        perms = perms[0]
-    return perms
 
 def _get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors
@@ -563,38 +510,6 @@ def _get_groupwise_means(X, group_idx):
     for group in groups:
         groupwise_means[group] = X[group_idx == group].mean(axis=0)
     return groupwise_means
-
-def _get_resample(rng, design):
-    if design['between'].nunique() > 1:
-        # Sample participants stratified by between factor
-        ptpts_by_between = design.groupby('between')['participant'].unique()
-        resampled_by_between = [rng.choice(ptpts, len(ptpts)) for ptpts in ptpts_by_between]
-        resampled_ptpts = np.concatenate(resampled_by_between)
-    else:
-        # Sample participants at random
-        unique_ptpts = design['participant'].unique()
-        resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
-    rows_by_ptpt = design.groupby('participant').indices
-    rows = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
-    return rows
-
-def _validate_resample(resample, stratifier):
-    # Ensure that each stratfier level contains at least 2 unique observations
-    # To do this quickly, compute min and max observation idx within category
-    # and check that min != max
-    resampled_levels = stratifier[resample]
-    order = np.argsort(resampled_levels)
-    stratifier = stratifier[order]
-    obs = resample[order]
-    # Stratifier level boundaries
-    boundaries = np.flatnonzero(np.diff(stratifier)) + 1
-    starts = np.r_[0, boundaries]
-    # Min/max observation per category
-    mins = np.minimum.reduceat(obs, starts)
-    maxs = np.maximum.reduceat(obs, starts)
-    # Invalid if all observations are identical within any level
-    invalid = (mins == maxs).any()
-    return invalid
 
 def _get_stacked_cormats(X, covariates, stratifier):
     submatrices = []
