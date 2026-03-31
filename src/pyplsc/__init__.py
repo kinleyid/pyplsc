@@ -321,7 +321,8 @@ class BaseClass():
         alpha = 1 - confint_level
         self.bootstrap_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
         self.__boot_done = True
-        return design_resampled
+        if return_boot_dist:
+            return design_resampled
     def get_design_yerr(self, lv_idx):
         """
         Get yerr for matplotlib barplots.
@@ -447,7 +448,7 @@ class PLSC(BaseClass):
     def fit(self, X, covariates, design=None, between=None, within=None, participant=None):
         self._setup_data(X)
         self._setup_design_matrix(design, between, within, participant)
-        self._setup_covariates(design, covariates)        
+        self._setup_covariates(design, covariates)
         R = _get_stacked_cormats(
             self.X_,
             self.covariates_,
