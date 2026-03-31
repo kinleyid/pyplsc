@@ -108,20 +108,22 @@ class BaseClass():
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
         self.brain_sals_ = v
-    def flip_signs(self, lv_idx):
+    def flip_signs(self, lv_idx=None):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
 
         Parameters
         ----------
         lv_idx : integer or list
-            The index or indices of latent variables whose signs should be flipped.
+            The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
 
         Returns
         -------
         None.
 
         """
+        if lv_idx is None:
+            lv_idx = range(self.n_lv_)
         self.design_sals_[:, lv_idx] *= -1
         self.brain_sals_[:, lv_idx] *= -1
         self.design_stat_[:, lv_idx] *= -1
@@ -303,10 +305,13 @@ class BaseClass():
                      for _ in tqdm(range(n_boot), desc='Getting resamples')]
         """
         boot_idxs = self._get_resamples(n_boot, validate=self.__validate_resamples)
+        '''
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling")
-        )
+        )'''
+        boot_results = [self._single_bootstrap_resample(boot_idx, alignment_method)
+                        for boot_idx in tqdm(boot_idxs, desc="Resampling")]
         design_resampled, brain_resampled = zip(*boot_results)
         # Compute standard deviations for brain saliences to get bootstrap ratios
         stds = np.stack(brain_resampled).std(axis=0)
@@ -376,6 +381,7 @@ class BDA(BaseClass):
         mean_centred = _get_mean_centred(
             X=self.X_,
             design=self.design_,
+            stratifier=self.stratifier_,
             pre_subtract=self.pre_subtract)
         self._initial_decomposition(mean_centred)
         # Compute design scores
@@ -396,7 +402,7 @@ class BDA(BaseClass):
         mean_centred = _get_mean_centred(
             X=self.X_[resample_idx],
             design=self.design_.iloc[resample_idx],
-            # stratifier=self.stratifier_[resample_idx],
+            stratifier=self.stratifier_[resample_idx],
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
         v = _align(v, self.brain_sals_, alignment_method)
