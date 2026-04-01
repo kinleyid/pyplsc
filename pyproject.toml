@@ -21,3 +21,13 @@ addopts = "--cov=pyplsc --cov-report=xml --cov-report=term-missing"
 [tool.coverage.run]
 source = ["pyplsc"]
 omit = ["tests/*"]
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-private = true
+fail-under = 90
+
+[tool.pydoclint]
+style = "numpy"
+arg-type-hints-in-docstring = false
+arg-type-hints-in-signature = false

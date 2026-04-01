@@ -10,12 +10,13 @@ import pandas as pd
 from pdb import set_trace
 
 class BaseClass():
-    # Parent class for PLSC and BDA
+    # Parent class for BDA and PLSC.
     def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self.__perm_done = False
         self.__boot_done = False
         self.__validate_resamples = validate_resamples
+        # Public properties
         self.svd_method = svd_method
         self.boot_stat = boot_stat
         self.random_state = random_state
@@ -72,6 +73,9 @@ class BaseClass():
         labels : pandas.DataFrame
             A dataframe with one column corresponding to each label and one row corresponding to each row of the design saliences.
 
+        Examples
+        --------
+        >>> labels = mod.get_labels()
         """
         condition_labels = self.design_[['between','within']].drop_duplicates()
         if 'covariates_' in dir(self):
@@ -117,14 +121,18 @@ class BaseClass():
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
 
+        :param lv_idx: The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
+
         Parameters
         ----------
         lv_idx : integer or list
             The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
 
-        Returns
-        -------
-        None.
+        Examples
+        --------
+        >>> mod.flip_signs() # Flip all signs
+        >>> mod.flip_signs(0) # Flip signs for the first latent variable
+        >>> mod.flip_signs([0, 1]) # Flip signs for the first two   latent variables
 
         """
         if lv_idx is None:
@@ -152,6 +160,10 @@ class BaseClass():
         data_scores : numpy.ndarray
             A 2D array of scores where rows correspond to different observations and columns correspond to different latent variables.
 
+        Examples
+        --------
+        >>> scores = mod.transform() # Get scores for data used to fit model
+        >>> scores = mod.transform(new_data) # Get scores for new data
         """
         if data is None:
             data = self.data_
@@ -199,7 +211,7 @@ class BaseClass():
         return perms
     def permute(self, n_perm=5000, return_null_dist=False, n_jobs=1):
         """
-        Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the pvals_ property.
+        Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the :attr:`pvals_` property.
 
         Parameters
         ----------
@@ -215,6 +227,10 @@ class BaseClass():
         null_dist : numpy.ndarray
             2D array containing null distribution of singular values, where each row is a different permutation and each columns is a different singular value.
 
+        Examples
+        --------
+        >>> mod.permute(n_perm=1000, n_jobs=-1)
+        >>> print(mod.pvals_)
         """
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
@@ -275,22 +291,22 @@ class BaseClass():
         confint_level : float, optional
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
-            Method to be used for aligning recomputed data saliences with original data saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
+            Method to be used for aligning recomputed data saliences with original data saliences. `'rotate'` uses the solution to the orthogonal Proctrustes problem. `'flip'` flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is `'rotate'`.
         return_boot_dist : bool, optional
             # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
-        Raises
-        ------
-        ValueError
-            DESCRIPTION.
-
         Returns
         -------
         design_resampled : numpy.ndarray
-            If return_boot_dist is true, returns the bootstrap distribution of boot_stat_
+            If `return_boot_dist` is true, returns the bootstrap distribution of :attr:`boot_stat_`
 
+        Examples
+        --------
+        >>> mod.bootstrap(1000, n_jobs=-1)
+        >>> print(mod.bootstrap_ratios_)
+        >>> print(mod.boot_stat_ci[..., 0]) # Print CI of boot_stat for first LV
         """
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
@@ -314,7 +330,7 @@ class BaseClass():
             return design_resampled
     def get_boot_stat_yerr(self, lv_idx):
         """
-        Get yerr for boot_stat_ that can be passed to a matplotlib bar plot.
+        Get yerr for :attr:`boot_stat_` that can be passed to a matplotlib bar plot.
 
         Parameters
         ----------
@@ -338,6 +354,55 @@ class BaseClass():
         return yerr
         
 class BDA(BaseClass):
+    """
+    Barycentric discriminant analysis model.
+    
+    Parameters
+    ----------
+    pre_subtract : str
+        Form of pre-subtraction to do.
+    
+    Attributes
+    ----------
+    boot_stat : str
+        Name of statistic whose distribution is derived during bootstrap resampling.
+    boot_stat_ : numpy.ndarray
+        Point estimate of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
+    boot_stat_ci_ : numpy.ndarray
+        Confidence interval on :attr:`boot_stat_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
+    bootstrap_ratios_ : numpy.ndarray
+        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+    confint_level_ : float
+        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
+    data_ : numpy.ndarray
+        Data used to fit model.
+    data_sals_ : numpy.ndarray
+        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
+    design_ : pandas.DataFrame
+        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+    design_sals_ : numpy.ndarray
+        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
+    design_scores_ : numpy.ndarray
+        Design scores for the data used to fit the model. Set by :meth:`fit`.
+    n_boot_ : int
+        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
+    n_lv_ : int
+        Number of latent variables in the model. Set by :meth:`fit`.
+    pre_subtract : str
+        Pre-centering method used when computing mean-centred data.
+    pvals_ : numpy.ndarray
+        Permutation p values for the latent variables. Set by :meth:`permute`.
+    random_state : int
+        Random state for reproducible permutation and bootstrap resampling.
+    singular_vals_ : numpy.ndarray
+        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
+    stratifier_ : numpy.ndarray
+        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
+    svd_method : str
+        Method to use for SVD.
+    variance_explained_
+        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
+    """
     def __init__(self, pre_subtract=None, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method,
                          boot_stat=boot_stat,
@@ -409,7 +474,7 @@ class BDA(BaseClass):
         return boot_stat, resampled_data_sals
   
 class PLSC(BaseClass):
-    def __init__(self, svd_method='lapack', random_state=None):
+    def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method,
                          random_state=random_state,
                          validate_resamples=True)
