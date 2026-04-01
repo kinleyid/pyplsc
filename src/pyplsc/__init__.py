@@ -19,6 +19,7 @@ class BaseClass():
         self.svd_method = svd_method
         self.random_state = random_state
     def _setup_data(self, data):
+        # Add data_ as a property
         valid_data = True
         if not isinstance(data, np.ndarray):
             valid_data = False
@@ -29,6 +30,7 @@ class BaseClass():
             raise ValueError('data must be a 2-dimensional numpy array')
         self.data_ = data
     def _setup_design_matrix(self, design=None, between=None, within=None, participant=None):
+        # Add design_matrix_ and stratifier_ as properties
         if participant is None:
             if within is not None:
                 raise ValueError('Participants must be differentiated if there is a within-participants factor')
@@ -89,6 +91,7 @@ class BaseClass():
             labels = condition_labels
         return labels
     def _svd(self, M, compute_uv=True):
+        # Single function to perform svd using the specified method
         if self.svd_method == 'lapack':
             if compute_uv:
                 u, s, v = lapack_svd(M, full_matrices=False, compute_uv=True)
@@ -102,6 +105,7 @@ class BaseClass():
             out = s
         return out
     def _initial_decomposition(self, to_factorize):
+        # Initial fit and add various properties
         u, s, v = self._svd(to_factorize)
         self.singular_vals_ = s
         self.n_lv_ = len(s)
@@ -129,11 +133,11 @@ class BaseClass():
         self.design_stat_[:, lv_idx] *= -1
         if self.__boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
-            self.bootstrap_ci_[..., lv_idx] *= -1
-            self.bootstrap_ci_ = self.bootstrap_ci_[(1, 0), ...]
+            self.design_stat_ci_[..., lv_idx] *= -1
+            self.design_stat_ci_ = self.design_stat_ci_[(1, 0), ...]
     def transform(self, data=None, lv_idx=None):
         """
-        Compute scores---i.e., coordinates of data in the new basis defined by the latent variables.
+        Compute scores, i.e., coordinates of data in the new basis defined by the latent variables.
 
         Parameters
         ----------
@@ -156,7 +160,7 @@ class BaseClass():
         data_scores = data @ sals
         return data_scores
     def _get_permutations(self, n_perm):
-        # Get indices that can be used to permute 
+        # Get indices that can be used to permute
         rng = np.random.default_rng(self.random_state)
         if self.design_['within'].nunique() == 1:
             # If no within-participants factor, just shuffle all rows
@@ -171,6 +175,7 @@ class BaseClass():
         perms = []
         for perm_n in tqdm(range(n_perm), desc='Getting permutations'):
             if case == 'only-between':
+                # Just shuffle all rows
                 perm = rng.permutation(n_obs)
             else:
                 # There is a within-participants factor
@@ -186,9 +191,9 @@ class BaseClass():
                     row_sets = rng.permutation(row_sets)
                     rows_by_ptpt = dict(zip(ptpts, row_sets))
                 # Assign new rows to participants
-                perm = np.zeros((n_obs,), dtype=np.int64)
+                perm = np.zeros((n_obs,), dtype=np.int64) # Pre-allocate to later index
                 for ptpt, rows in rows_by_ptpt.items():
-                    perm[unshuffled_rows_by_ptpt[ptpt]] = rows
+                    perm[unshuffled_rows_by_ptpt[ptpt]] = rows # Assign participant's new rows to their old rows
             perms.append(perm)
         return perms
     def permute(self, n_perm=5000, return_null_dist=False, n_jobs=1):
@@ -200,15 +205,9 @@ class BaseClass():
         n_perm : int, optional
             Number of permutations t operform. The default is 5000.
         return_null_dist : bool, optional
-            If true, permutation samples will be returned.
+            If true, permutation samples will be returned as a 2D (n. perms, n. latent vars) array.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
-
-        Raises
-        ------
-        ValueError
-            # TODO: document
-            DESCRIPTION.
 
         Returns
         -------
@@ -264,7 +263,7 @@ class BaseClass():
                     validated = True
             resamples.append(resample)
         return resamples
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', svd_method='lapack', return_boot_dist=False, n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', return_boot_dist=False, n_jobs=1):
         """
         Perform bootstrap resampling to assess the reliability of saliences.
 
@@ -276,8 +275,6 @@ class BaseClass():
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
             Method to be used for aligning recomputed data saliences with original data saliences. 'rotate' uses the solution to the orthogonal Proctrustes problem. 'flip' flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is 'rotate'.
-        svd_method : string, optional
-            # TODO: remove Method to use for singular value decomposition. Options are 'lapack' (numpy.linalg.svd, default) or 'randomized' (sklearn.utils.extmath.randomized_svd).
         return_boot_dist : bool, optional
             # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
         n_jobs : int, optional
@@ -291,27 +288,18 @@ class BaseClass():
         Returns
         -------
         design_resampled : numpy.ndarray
-            # TODO: describe
+            If return_boot_dist is true, returns the bootstrap distribution of design_stat_
 
         """
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
-        # Get variables needed for bootstrapping
         # Pre-generate bootstrap samples
-        """
-        boot_idxs = [self._get_resample(rng)
-                     for _ in tqdm(range(n_boot), desc='Getting resamples')]
-        """
         boot_idxs = self._get_resamples(n_boot, validate=self.__validate_resamples)
-        '''
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
-            for boot_idx in tqdm(boot_idxs, desc="Resampling")
-        )'''
-        boot_results = [self._single_bootstrap_resample(boot_idx, alignment_method)
-                        for boot_idx in tqdm(boot_idxs, desc="Resampling")]
+            for boot_idx in tqdm(boot_idxs, desc="Resampling"))
         design_resampled, data_resampled = zip(*boot_results)
         # Compute standard deviations for data saliences to get bootstrap ratios
         stds = np.stack(data_resampled).std(axis=0)
@@ -319,36 +307,31 @@ class BaseClass():
         # Compute confidence intervals for design saliences
         design_resampled = np.stack(design_resampled)
         alpha = 1 - confint_level
-        self.bootstrap_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
+        self.design_stat_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
         self.__boot_done = True
         if return_boot_dist:
             return design_resampled
-    def get_design_yerr(self, lv_idx):
+    def get_design_stat_yerr(self, lv_idx):
         """
-        Get yerr for matplotlib barplots.
+        Get yerr for matplotlib barplots of design_stat_.
 
         Parameters
         ----------
         lv_idx : int
             Integer indexing the latent variable of interest.
 
-        Raises
-        ------
-        ValueError
-            DESCRIPTION.
-
         Returns
         -------
         yerr : numpy.ndarray
-            yerr value that can be passed to matplotib's pyplot.bar().
+            2D array with shape (2, n. design saliences) that can be passed to matplotib's pyplot.bar() as the yerr= argument.
 
         """
         if not self.__boot_done:
-            raise ValueError('Bootstrap resampling must be done before confidence intervals can be extracted')
+            raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer index of a single latent variable')
         est = self.design_stat_[:, lv_idx]
-        ci = self.bootstrap_ci_[..., lv_idx]
+        ci = self.design_stat_ci_[..., lv_idx]
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
@@ -446,6 +429,7 @@ class PLSC(BaseClass):
             assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
             design_scores[obs_mask] = obs_submat @ sal_submat
     def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
+        # TODO: document
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
