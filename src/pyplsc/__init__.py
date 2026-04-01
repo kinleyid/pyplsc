@@ -11,12 +11,13 @@ from pdb import set_trace
 
 class BaseClass():
     # Parent class for PLSC and BDA
-    def __init__(self, svd_method='lapack', random_state=None, validate_resamples=False):
+    def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self.__perm_done = False
         self.__boot_done = False
         self.__validate_resamples = validate_resamples
         self.svd_method = svd_method
+        self.boot_stat = boot_stat
         self.random_state = random_state
     def _setup_data(self, data):
         # Add data_ as a property
@@ -130,11 +131,11 @@ class BaseClass():
             lv_idx = range(self.n_lv_)
         self.design_sals_[:, lv_idx] *= -1
         self.data_sals_[:, lv_idx] *= -1
-        self.design_stat_[:, lv_idx] *= -1
+        self.boot_stat_[:, lv_idx] *= -1
         if self.__boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
-            self.design_stat_ci_[..., lv_idx] *= -1
-            self.design_stat_ci_ = self.design_stat_ci_[(1, 0), ...]
+            self.boot_stat_ci_[..., lv_idx] *= -1
+            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
     def transform(self, data=None, lv_idx=None):
         """
         Compute scores, i.e., coordinates of data in the new basis defined by the latent variables.
@@ -288,7 +289,7 @@ class BaseClass():
         Returns
         -------
         design_resampled : numpy.ndarray
-            If return_boot_dist is true, returns the bootstrap distribution of design_stat_
+            If return_boot_dist is true, returns the bootstrap distribution of boot_stat_
 
         """
         if n_boot < 1:
@@ -307,13 +308,13 @@ class BaseClass():
         # Compute confidence intervals for design saliences
         design_resampled = np.stack(design_resampled)
         alpha = 1 - confint_level
-        self.design_stat_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
+        self.boot_stat_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
         self.__boot_done = True
         if return_boot_dist:
             return design_resampled
-    def get_design_stat_yerr(self, lv_idx):
+    def get_boot_stat_yerr(self, lv_idx):
         """
-        Get yerr for matplotlib barplots of design_stat_.
+        Get yerr for boot_stat_ that can be passed to a matplotlib bar plot.
 
         Parameters
         ----------
@@ -330,15 +331,16 @@ class BaseClass():
             raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer index of a single latent variable')
-        est = self.design_stat_[:, lv_idx]
-        ci = self.design_stat_ci_[..., lv_idx]
+        est = self.boot_stat_[:, lv_idx]
+        ci = self.boot_stat_ci_[..., lv_idx]
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
         
 class BDA(BaseClass):
-    def __init__(self, pre_subtract=None, svd_method='lapack', random_state=None):
+    def __init__(self, pre_subtract=None, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method,
+                         boot_stat=boot_stat,
                          random_state=random_state,
                          validate_resamples=False)
         self.pre_subtract = pre_subtract
@@ -370,7 +372,11 @@ class BDA(BaseClass):
         self._initial_decomposition(mean_centred)
         # Compute design scores
         self.design_scores_ = self.design_sals_[self.stratifier_]
-        self.design_stat_ = mean_centred @ self.data_sals_ # Score per barycentre
+        if self.boot_stat == 'condwise-scores-centred':
+            self.boot_stat_ = mean_centred @ self.data_sals_
+        elif self.boot_stat == 'condwise-scores':
+            data_scores = self.transform()
+            self.boot_stat_ = _get_groupwise_means(data_scores, self.stratifier_)
         return self
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
@@ -383,17 +389,24 @@ class BDA(BaseClass):
         return s
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
+        resampled_data = self.data_[resample_idx]
+        resampled_design = self.design_.iloc[resample_idx]
+        resampled_strat = self.stratifier_[resample_idx]
         mean_centred = _get_mean_centred(
-            data=self.data_[resample_idx],
-            design=self.design_.iloc[resample_idx],
-            stratifier=self.stratifier_[resample_idx],
+            data=resampled_data,
+            design=resampled_design,
+            stratifier=resampled_strat,
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
         v = _align(v, self.data_sals_, alignment_method)
-        data_estimate = v @ np.diag(s)
+        resampled_data_sals = v @ np.diag(s)
         # Brain scores
-        design_estimate = mean_centred @ self.data_sals_
-        return design_estimate, data_estimate
+        if self.boot_stat == 'condwise-scores-centred':
+            boot_stat = mean_centred @ self.data_sals_
+        elif self.boot_stat == 'condwise-scores':
+            scores = resampled_data @ self.data_sals_
+            boot_stat = _get_groupwise_means(scores, resampled_strat)
+        return boot_stat, resampled_data_sals
   
 class PLSC(BaseClass):
     def __init__(self, svd_method='lapack', random_state=None):
@@ -441,7 +454,7 @@ class PLSC(BaseClass):
         self.design_scores_ = self._get_design_scores()
         # Correlation between data scores and covariates
         data_scores = self.transform()
-        self.design_stat_ = _get_stacked_cormats(data_scores,
+        self.boot_stat_ = _get_stacked_cormats(data_scores,
                                                  self.covariates_,
                                                  self.stratifier_)
     def _single_permutation(self, perm_idx):
@@ -461,12 +474,16 @@ class PLSC(BaseClass):
                                  resampled_strat)
         _, s, v = self._svd(R)
         v = _align(v, self.data_sals_, alignment_method)
-        data_estimate = v @ np.diag(s)
-        # Correlation between covariates and data scores
-        design_estimate = _get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
-                                               resampled_cov,
-                                               resampled_strat)
-        return design_estimate, data_estimate
+        resampled_data_sals = v @ np.diag(s)
+        if self.boot_stat == 'score-covariate-corr':
+            # Correlation between covariates and data scores
+            boot_stat = _get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
+                                             resampled_cov,
+                                             resampled_strat)
+        elif self.boot_stat == 'condwise-scores':
+            scores = resampled_data @ self.data_sals_
+            boot_stat = _get_groupwise_means(scores, resampled_strat)
+        return boot_stat, resampled_data_sals
 
 def _get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors

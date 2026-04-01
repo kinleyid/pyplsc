@@ -35,7 +35,7 @@ def test_bda_basic(fit_bda):
     assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
     fit_bda.permute(n_perm=20)
     fit_bda.bootstrap(n_boot=200)
-    yerr = fit_bda.get_design_yerr(0)
+    yerr = fit_bda.get_boot_stat_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
     with pytest.raises(Exception):
