@@ -355,12 +355,24 @@ class BaseClass():
         
 class BDA(BaseClass):
     """
-    Barycentric discriminant analysis model.
+    Barycentric discriminant analysis model. Used for analyzing condition-wise differences.
     
     Parameters
     ----------
     pre_subtract : str
         Form of pre-subtraction to do.
+    boot_stat : str, optional
+        Name of statistic to recompute on each bootstrap resample. Must be one of:
+
+        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original version of PLS.
+        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
+    svd_method : str, optional
+        Method to use for singular value decomposition. Must be one of:
+            
+        - ``'lapack'`` (default): use ``numpy.linalg.svd``.
+        - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
+    random_state : int, optional
+        Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
     
     Attributes
     ----------
@@ -410,7 +422,35 @@ class BDA(BaseClass):
                          validate_resamples=False)
         self.pre_subtract = pre_subtract
     def fit(self, data, design=None, between=None, within=None, participant=None):
-        # TODO: document
+        """
+        Fit a barycentric discriminant analysis model.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data array of shape (n. observations, n.features). Each row should contain the average data for a participant, possibly the average for some within-participants condition for a participant.
+        design : pandas.DataFrame, optional
+            DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
+        between : str or iterable, optional
+            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating no between-participant conditions.
+        within : TYPE, optional
+            DESCRIPTION. The default is None.
+        participant : TYPE, optional
+            DESCRIPTION. The default is None.
+
+        Raises
+        ------
+        ValueError
+            DESCRIPTION.
+        Warning
+            DESCRIPTION.
+
+        Returns
+        -------
+        TYPE
+            DESCRIPTION.
+
+        """
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
         if self.pre_subtract is not None:
