@@ -623,6 +623,15 @@ class PLSC(BaseClass):
         participant : TYPE, optional
             Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
 
+        Examples
+        --------
+        >>> mod = pyplsc.PLSC()
+        >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
+        >>> covariates = numpy.random.normal((4, 3)) # 4 observations of 3 covariates
+        >>> # Pattern 1: provide design matrix, specify column names of condition indicators
+        >>> mod.fit(data, design, between='group')
+        >>> # Pattern 2: provide condition indicators directly as iterables
+        >>> mod.fit(data, between)
         """
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
