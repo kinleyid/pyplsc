@@ -79,7 +79,7 @@ class BaseClass():
         --------
         >>> labels = mod.get_labels()
         """
-        condition_labels = self.design_[which].drop_duplicates()
+        condition_labels = self.design_[['between', 'within']].drop_duplicates()
         if isinstance(self, PLSC):
             # Create a MultiIndex from product of conditions and covariates
             index = pd.MultiIndex.from_product(
@@ -97,7 +97,7 @@ class BaseClass():
         else:
             labels = condition_labels
         # Extract subset of labels
-        if which == None:
+        if which is None:
             which = ['between', 'within']
             if isinstance(self, PLSC):
                 which.append('covariate')
@@ -373,9 +373,9 @@ class BaseClass():
         """
         if not self.__boot_done:
             raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
-        if not isinstance(lv_idx, int):
-            raise ValueError('lv_idx must be an integer index of a single latent variable')
         est = self.boot_stat_val_[:, lv_idx]
+        if len(est.shape) == 2:
+            raise ValueError('lv_idx must index a single latent variable')
         ci = self.boot_stat_ci_[..., lv_idx]
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
