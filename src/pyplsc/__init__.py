@@ -125,7 +125,7 @@ class BaseClass():
 
         Parameters
         ----------
-        lv_idx : integer or list
+        lv_idx : indexer
             The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
 
         Examples
@@ -152,7 +152,7 @@ class BaseClass():
         ----------
         data : numpy.ndarray, optional
             Data to transform. The default is None, which yields scores for the data on which the model was fit.
-        lv_idx : index, optional
+        lv_idx : indexer, optional
             Index of latent variable(s) for which to compute scores. Default is None, which computes scores for all latent variables.
 
         Returns
@@ -362,7 +362,7 @@ class BDA(BaseClass):
     pre_subtract : str
         Form of pre-subtraction to do.
     boot_stat : str, optional
-        Name of statistic to recompute on each bootstrap resample. Must be one of:
+        Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
         - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
@@ -379,7 +379,7 @@ class BDA(BaseClass):
     boot_stat : str
         Name of statistic whose distribution is derived during bootstrap resampling.
     boot_stat_ : numpy.ndarray
-        Point estimate of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
+        Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
     boot_stat_ci_ : numpy.ndarray
         Confidence interval on :attr:`boot_stat_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
     bootstrap_ratios_ : numpy.ndarray
@@ -432,23 +432,20 @@ class BDA(BaseClass):
         design : pandas.DataFrame, optional
             DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
         between : str or iterable, optional
-            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating no between-participant conditions.
+            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
         within : TYPE, optional
-            DESCRIPTION. The default is None.
+            Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
         participant : TYPE, optional
-            DESCRIPTION. The default is None.
-
-        Raises
-        ------
-        ValueError
-            DESCRIPTION.
-        Warning
-            DESCRIPTION.
-
-        Returns
-        -------
-        TYPE
-            DESCRIPTION.
+            Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
+            
+        Examples
+        --------
+        >>> mod = pyplsc.BDA()
+        >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
+        >>> # Pattern 1: provide design matrix, specify column names of condition indicators
+        >>> mod.fit(data, design, between='group')
+        >>> # Pattern 2: provide condition indicators directly as iterables
+        >>> mod.fit(data, between)
 
         """
         if between is None and within is None:
@@ -514,6 +511,67 @@ class BDA(BaseClass):
         return boot_stat, resampled_data_sals
   
 class PLSC(BaseClass):
+    """
+    Partial least squares correlation model. Used for analyzing relationships between data and covariates across multiple conditions.
+    
+    Parameters
+    ----------
+    boot_stat : str, optional
+        Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
+
+        - ``'score-covariate-corr'`` (default): Correlations between covariates and scores (i.e., output of :meth:`transform`). Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original version of PLS.
+        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
+    svd_method : str, optional
+        Method to use for singular value decomposition. Must be one of:
+            
+        - ``'lapack'`` (default): use ``numpy.linalg.svd``.
+        - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
+    random_state : int, optional
+        Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
+    
+    Attributes
+    ----------
+    boot_stat : str
+        Name of statistic whose distribution is derived during bootstrap resampling.
+    boot_stat_ : numpy.ndarray
+        Point estimate from initial decomposition of statistic whose distribution is derived during :meth:`bootstrap` resampling. Set by :meth:`fit`.
+    boot_stat_ci_ : numpy.ndarray
+        Confidence interval on :attr:`boot_stat_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
+    bootstrap_ratios_ : numpy.ndarray
+        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+    confint_level_ : float
+        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
+    covariates_ : pandas.DataFrame
+        Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
+    data_ : numpy.ndarray
+        Data used to fit model.
+    data_sals_ : numpy.ndarray
+        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
+    design_ : pandas.DataFrame
+        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+    design_sals_ : numpy.ndarray
+        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
+    design_scores_ : numpy.ndarray
+        Design scores for the data used to fit the model. Set by :meth:`fit`.
+    n_boot_ : int
+        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
+    n_lv_ : int
+        Number of latent variables in the model. Set by :meth:`fit`.
+    pre_subtract : str
+        Pre-centering method used when computing mean-centred data.
+    pvals_ : numpy.ndarray
+        Permutation p values for the latent variables. Set by :meth:`permute`.
+    random_state : int
+        Random state for reproducible permutation and bootstrap resampling.
+    singular_vals_ : numpy.ndarray
+        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
+    stratifier_ : numpy.ndarray
+        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
+    svd_method : str
+        Method to use for SVD.
+    variance_explained_
+        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
+    """
     def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method,
                          random_state=random_state,
@@ -547,7 +605,25 @@ class PLSC(BaseClass):
             assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
             design_scores[obs_mask] = obs_submat @ sal_submat
     def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
-        # TODO: document
+        """
+        Fit a partial least squares correlation model.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data array of shape (n. observations, n. features). Each row should contain the average data for a participant, possibly the average for some within-participants condition for a participant.
+        covariates : numpy.ndarray or pandas.DataFrame or list
+            2D data of size (n. observations, n. features) to be used as covariates, or names of columns in ``design`` containing covariates.
+        design : pandas.DataFrame, optional
+            DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
+        between : str or iterable, optional
+            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
+        within : TYPE, optional
+            Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
+        participant : TYPE, optional
+            Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
+
+        """
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
