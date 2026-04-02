@@ -11,7 +11,7 @@ def sample_data():
     np.random.seed(123)
     data = np.random.normal(size=(16, 2))
     covariates = np.random.normal(size=(16, 2))
-    between = np.array([0]*8 + [1]*8)
+    between = np.array(['a']*8 + ['b']*8)
     within = np.array([0, 1]*8)
     participant = np.array(np.cumsum([1, 0]*8))
     return data, covariates, between, within, participant
@@ -46,6 +46,13 @@ def test_bda_basic(fit_bda):
     with pytest.raises(Exception):
         fit_bda.bootstrap(0)    
     fit_bda.bootstrap(n_boot=2, alignment_method='flip')
+
+def test_bda_labels(fit_bda):
+    fit_bda.get_labels()
+    fit_bda.get_labels(output='frame')
+    fit_bda.get_labels(output='tuple-list')
+    fit_bda.get_labels(output='str')
+    fit_bda.get_labels(output='str', join='-')
     
 def test_warnings(sample_data):
     data, _, between, within, participant = sample_data
@@ -126,6 +133,13 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.permute(n_perm=2)
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
+
+def test_plsc_labels(fit_plsc):
+    fit_plsc.get_labels()
+    fit_plsc.get_labels(output='frame')
+    fit_plsc.get_labels(output='tuple-list')
+    fit_plsc.get_labels(output='str')
+    fit_plsc.get_labels(output='str', join='-')
 
 def test_svd_methods(sample_data):
     data, _, between, within, participant = sample_data

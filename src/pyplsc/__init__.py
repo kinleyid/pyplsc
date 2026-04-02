@@ -64,9 +64,11 @@ class BaseClass():
             design = design[['between', 'within', 'participant']]
         self.design_ = design
         self.stratifier_ = _get_stratifier(design) # This is handy to pre-compute because it's used many times later on
-    def get_labels(self):
+    def get_labels(self, which=None, output='frame', join=' '):
         """
         Get the labels corresponding to each row of the design saliences. For BDA, this is the between- and within-participant condition labels. For PLSC, covariate labels are also included.
+        
+        # TODO: document output and join args
 
         Returns
         -------
@@ -77,8 +79,14 @@ class BaseClass():
         --------
         >>> labels = mod.get_labels()
         """
-        condition_labels = self.design_[['between','within']].drop_duplicates()
-        if 'covariates_' in dir(self):
+        if which == None:
+            which = ['between', 'within']
+        else:
+            if 'participant' in which:
+                # TODO: improve
+                raise ValueError()
+        condition_labels = self.design_[which].drop_duplicates()
+        if isinstance(self, PLSC):
             # Create a MultiIndex from product of conditions and covariates
             index = pd.MultiIndex.from_product(
                 [condition_labels.index, self.covariates_.columns],
@@ -94,6 +102,18 @@ class BaseClass():
             )
         else:
             labels = condition_labels
+        # Output is currently a dataframe, corresponding to output='frame'
+        if output != 'frame':
+            tuple_list = pd.MultiIndex.from_frame(labels).to_list()
+            if output == 'tuple-list':
+                labels = tuple_list
+            elif output == 'str':
+                labels = []
+                for tup in tuple_list:
+                    # Convert to strings
+                    tup = [str(item) for item in tup]
+                    # Join
+                    labels.append(join.join(tup))
         return labels
     def _svd(self, M, compute_uv=True):
         # Single function to perform svd using the specified method
@@ -139,11 +159,11 @@ class BaseClass():
             lv_idx = range(self.n_lv_)
         self.design_sals_[:, lv_idx] *= -1
         self.data_sals_[:, lv_idx] *= -1
-        self.boot_stat_[:, lv_idx] *= -1
+        self.boot_stat_val_[:, lv_idx] *= -1
         if self.__boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
-            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
+            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...] # TODO: check that this logic is correct
     def transform(self, data=None, lv_idx=None):
         """
         Compute scores, i.e., coordinates of data in the new basis defined by the latent variables.
@@ -259,7 +279,7 @@ class BaseClass():
             strat_levels = np.unique(self.stratifier_)
             ptpts = self.design_['participant'].to_numpy()
         resamples = []
-        for boot_n in tqdm(range(n_boot)):
+        for boot_n in tqdm(range(n_boot), desc='Getting resamples'):
             validated = False
             while not validated:
                 if case == 'between':
@@ -300,7 +320,7 @@ class BaseClass():
         Returns
         -------
         design_resampled : numpy.ndarray
-            If `return_boot_dist` is true, returns the bootstrap distribution of :attr:`boot_stat_`
+            If `return_boot_dist` is true, returns the bootstrap distribution of the statistic named by :attr:`boot_stat`
 
         Examples
         --------
@@ -330,7 +350,7 @@ class BaseClass():
             return design_resampled
     def get_boot_stat_yerr(self, lv_idx):
         """
-        Get yerr for :attr:`boot_stat_` that can be passed to a matplotlib bar plot.
+        Get yerr for statistic named by :attr:`boot_stat` that can be passed to a matplotlib bar plot.
 
         Parameters
         ----------
@@ -342,12 +362,20 @@ class BaseClass():
         yerr : numpy.ndarray
             2D array with shape (2, n. design saliences) that can be passed to matplotib's pyplot.bar() as the yerr= argument.
 
+        Examples
+        --------
+        >>> # Make bar plot of boot_stat
+        >>> x = mod.get_labels()['between']
+        >>> lv_idx = 0 # First latent variable
+        >>> height = mod.boot_stat_val_[:, lv_idx]
+        >>> yerr = mod.get_boot_stat_yerr(lv_idx)
+        >>> matplotlib.pyplot.bar(x=x, height=height, yerr=yerr)
         """
         if not self.__boot_done:
             raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer index of a single latent variable')
-        est = self.boot_stat_[:, lv_idx]
+        est = self.boot_stat_val_[:, lv_idx]
         ci = self.boot_stat_ci_[..., lv_idx]
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
@@ -355,7 +383,7 @@ class BaseClass():
         
 class BDA(BaseClass):
     """
-    Barycentric discriminant analysis model. Used for analyzing condition-wise differences.
+    Barycentric discriminant analysis model, also known as mean-centred PLS. Used for analyzing condition-wise differences.
     
     Parameters
     ----------
@@ -378,10 +406,10 @@ class BDA(BaseClass):
     ----------
     boot_stat : str
         Name of statistic whose distribution is derived during bootstrap resampling.
-    boot_stat_ : numpy.ndarray
+    boot_stat_val_ : numpy.ndarray
         Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
     boot_stat_ci_ : numpy.ndarray
-        Confidence interval on :attr:`boot_stat_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
+        Confidence interval on :attr:`boot_stat_val_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
     bootstrap_ratios_ : numpy.ndarray
         Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     confint_level_ : float
@@ -441,6 +469,7 @@ class BDA(BaseClass):
         Examples
         --------
         >>> mod = pyplsc.BDA()
+        >>> data = numpy.random.normal(size=(4, 3))
         >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
         >>> # Pattern 1: provide design matrix, specify column names of condition indicators
         >>> mod.fit(data, design, between='group')
@@ -475,10 +504,11 @@ class BDA(BaseClass):
         # Compute design scores
         self.design_scores_ = self.design_sals_[self.stratifier_]
         if self.boot_stat == 'condwise-scores-centred':
-            self.boot_stat_ = mean_centred @ self.data_sals_
+            val = mean_centred @ self.data_sals_
         elif self.boot_stat == 'condwise-scores':
             data_scores = self.transform()
-            self.boot_stat_ = _get_groupwise_means(data_scores, self.stratifier_)
+            val = _get_groupwise_means(data_scores, self.stratifier_)
+        self.boot_stat_val_ = val
         return self
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
@@ -512,7 +542,7 @@ class BDA(BaseClass):
   
 class PLSC(BaseClass):
     """
-    Partial least squares correlation model. Used for analyzing relationships between data and covariates across multiple conditions.
+    Partial least squares correlation model, also known as behavioural PLS. Used for analyzing relationships between data and covariates across multiple conditions.
     
     Parameters
     ----------
@@ -533,14 +563,14 @@ class PLSC(BaseClass):
     ----------
     boot_stat : str
         Name of statistic whose distribution is derived during bootstrap resampling.
-    boot_stat_ : numpy.ndarray
+    boot_stat_val_ : numpy.ndarray
         Point estimate from initial decomposition of statistic whose distribution is derived during :meth:`bootstrap` resampling. Set by :meth:`fit`.
     boot_stat_ci_ : numpy.ndarray
-        Confidence interval on :attr:`boot_stat_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
+        Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
     bootstrap_ratios_ : numpy.ndarray
         Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     confint_level_ : float
-        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
+        Level of confidence interval on stat named by :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
     covariates_ : pandas.DataFrame
         Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
     data_ : numpy.ndarray
@@ -573,7 +603,8 @@ class PLSC(BaseClass):
         Proportion of variance explained by each latent variable. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
-        super().__init__(svd_method=svd_method,
+        super().__init__(boot_stat=boot_stat,
+                         svd_method=svd_method,
                          random_state=random_state,
                          validate_resamples=True)
     def _setup_covariates(self, design, covariates):
@@ -626,8 +657,9 @@ class PLSC(BaseClass):
         Examples
         --------
         >>> mod = pyplsc.PLSC()
+        >>> data = numpy.random.normal(size=(4, 3)) # 4 observations of 3 variables
+        >>> covariates = numpy.random.normal(size=(4, 2)) # 4 observations of 2 covariates
         >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
-        >>> covariates = numpy.random.normal((4, 3)) # 4 observations of 3 covariates
         >>> # Pattern 1: provide design matrix, specify column names of condition indicators
         >>> mod.fit(data, design, between='group')
         >>> # Pattern 2: provide condition indicators directly as iterables
@@ -644,9 +676,10 @@ class PLSC(BaseClass):
         self.design_scores_ = self._get_design_scores()
         # Correlation between data scores and covariates
         data_scores = self.transform()
-        self.boot_stat_ = _get_stacked_cormats(data_scores,
-                                                 self.covariates_,
-                                                 self.stratifier_)
+        # TODO: update for multiple boot stats
+        self.boot_stat_val_ = _get_stacked_cormats(data_scores,
+                                                   self.covariates_,
+                                                   self.stratifier_)
     def _single_permutation(self, perm_idx):
         R = _get_stacked_cormats(
             self.data_,
@@ -668,8 +701,8 @@ class PLSC(BaseClass):
         if self.boot_stat == 'score-covariate-corr':
             # Correlation between covariates and data scores
             boot_stat = _get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
-                                             resampled_cov,
-                                             resampled_strat)
+                                       resampled_cov,
+                                       resampled_strat)
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
             boot_stat = _get_groupwise_means(scores, resampled_strat)
@@ -686,7 +719,7 @@ def _get_stratifier(design, output='ints'):
 
 def _pre_centre(data, design, pre_subtract):
     # Pre-subtract between- or within-wise means if applicable
-    group_idx = design[pre_subtract]
+    group_idx = design[pre_subtract].cat.codes
     rowwise_group_means = _get_groupwise_means(data, group_idx)[group_idx]
     return data - rowwise_group_means
 
@@ -703,10 +736,10 @@ def _get_mean_centred(data, design, stratifier=None, pre_subtract=None):
 
 def _get_groupwise_means(data, group_idx):
     groups = np.unique(group_idx)
-    # Pre-allocate memory
+    # Initialize
     groupwise_means = np.zeros((len(groups), data.shape[1]), dtype=data.dtype)
-    for group in groups:
-        groupwise_means[group] = data[group_idx == group].mean(axis=0)
+    for i, group in enumerate(groups):
+        groupwise_means[i] = data[group_idx == group].mean(axis=0)
     return groupwise_means
 
 def _get_stacked_cormats(data, covariates, stratifier):

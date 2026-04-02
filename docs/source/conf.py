@@ -13,10 +13,19 @@ author = 'Isaac Kinley'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
+extensions = [
+	'sphinx.ext.autodoc',
+	'sphinx.ext.napoleon',
+	'matplotlib.sphinxext.plot_directive',
+	'nbsphinx'
+]
 
 napoleon_numpy_docstring = True
 napoleon_use_ivar = False
+
+# nbsphinx_execute = "never"
+nbsphinx_execute = "always"
+exclude_patterns = ["build", "**.ipynb_checkpoints"]
 
 import os
 import sys
