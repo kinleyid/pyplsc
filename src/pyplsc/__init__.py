@@ -79,12 +79,6 @@ class BaseClass():
         --------
         >>> labels = mod.get_labels()
         """
-        if which == None:
-            which = ['between', 'within']
-        else:
-            if 'participant' in which:
-                # TODO: improve
-                raise ValueError()
         condition_labels = self.design_[which].drop_duplicates()
         if isinstance(self, PLSC):
             # Create a MultiIndex from product of conditions and covariates
@@ -102,6 +96,12 @@ class BaseClass():
             )
         else:
             labels = condition_labels
+        # Extract subset of labels
+        if which == None:
+            which = ['between', 'within']
+            if isinstance(self, PLSC):
+                which.append('covariate')
+        labels = labels[which]
         # Output is currently a dataframe, corresponding to output='frame'
         if output != 'frame':
             tuple_list = pd.MultiIndex.from_frame(labels).to_list()

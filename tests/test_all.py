@@ -48,7 +48,7 @@ def test_bda_basic(fit_bda):
     fit_bda.bootstrap(n_boot=2, alignment_method='flip')
 
 def test_bda_labels(fit_bda):
-    fit_bda.get_labels()
+    fit_bda.get_labels('between')
     fit_bda.get_labels(output='frame')
     fit_bda.get_labels(output='tuple-list')
     fit_bda.get_labels(output='str')
@@ -135,7 +135,7 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.transform(lv_idx=0)
 
 def test_plsc_labels(fit_plsc):
-    fit_plsc.get_labels()
+    fit_plsc.get_labels(which='covariate')
     fit_plsc.get_labels(output='frame')
     fit_plsc.get_labels(output='tuple-list')
     fit_plsc.get_labels(output='str')
