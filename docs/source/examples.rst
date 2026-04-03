@@ -2,7 +2,7 @@
 Examples
 ====================
 
-Below are some examples of how to use pyplsc to analyze simulated data.
+Below are some examples of how to use ``pyplsc`` with simulated data.
 
 .. toctree::
    :maxdepth: 1

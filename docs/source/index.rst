@@ -24,14 +24,14 @@ Quickstart
 
    from pyplsc import PLSC
 
-   plsc = BDA().fit(data=X, covariates=Y design=table, between='group')
+   plsc = PLSC().fit(data=X, covariates=Y, design=table, between='group')
    plsc.permute(1000) # Permutation testing to assess significance
    plsc.bootstrap(1000) # Bootstrap resampling to assess reliability
 
 .. toctree::
    :maxdepth: 1
+   :hidden:
 
-   introduction
    notebooks/background
    examples
    api
