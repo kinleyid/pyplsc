@@ -16,7 +16,6 @@ author = 'Isaac Kinley'
 extensions = [
 	'sphinx.ext.autodoc',
 	'sphinx.ext.napoleon',
-	'matplotlib.sphinxext.plot_directive',
 	'nbsphinx'
 ]
 
