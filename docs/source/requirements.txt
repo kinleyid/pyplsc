@@ -2,3 +2,5 @@ pyplsc
 matplotlib
 nbsphinx
 ipykernel
+tqdm
+pandas
