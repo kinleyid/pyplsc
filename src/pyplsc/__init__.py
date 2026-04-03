@@ -635,6 +635,7 @@ class PLSC(BaseClass):
             # Ensure each covariate is being multiplied by the appropriate salience
             assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
             design_scores[obs_mask] = obs_submat @ sal_submat
+        return design_scores
     def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
         """
         Fit a partial least squares correlation model.

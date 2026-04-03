@@ -32,5 +32,6 @@ Quickstart
    :maxdepth: 1
 
    introduction
+   notebooks/background
    examples
    api

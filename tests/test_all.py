@@ -46,6 +46,7 @@ def test_bda_basic(fit_bda):
     with pytest.raises(Exception):
         fit_bda.bootstrap(0)    
     fit_bda.bootstrap(n_boot=2, alignment_method='flip')
+    assert fit_bda.design_scores_ is not None
 
 def test_bda_labels(fit_bda):
     fit_bda.get_labels('between')
@@ -133,6 +134,7 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.permute(n_perm=2)
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
+    assert fit_plsc.design_scores_ is not None
 
 def test_plsc_labels(fit_plsc):
     fit_plsc.get_labels(which='covariate')
