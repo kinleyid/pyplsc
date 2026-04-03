@@ -11,7 +11,7 @@ A python implementation of partial least squares correlation (PLSC).
 Installation
 ------------
 
-pyplsc can be installed from pypi via:
+``pyplsc`` can be installed from pypi via:
 
 .. code-block::
 
@@ -20,6 +20,8 @@ pyplsc can be installed from pypi via:
 Quickstart
 ----------
 
+``pyplsc`` uses ``sklearn``-style syntax for model fitting:
+
 .. code-block::
 
    from pyplsc import PLSC
@@ -27,6 +29,8 @@ Quickstart
    plsc = PLSC().fit(data=X, covariates=Y, design=table, between='group')
    plsc.permute(1000) # Permutation testing to assess significance
    plsc.bootstrap(1000) # Bootstrap resampling to assess reliability
+
+The examples and API explain these methods in greater depth.
 
 .. toctree::
    :maxdepth: 1
