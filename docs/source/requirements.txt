@@ -5,6 +5,6 @@ ipykernel
 tqdm
 pandas
 scipy
-sklearn
+scikit-learn
 joblib
 numpy
