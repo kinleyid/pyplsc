@@ -5,3 +5,6 @@ ipykernel
 tqdm
 pandas
 scipy
+sklearn
+joblib
+numpy
