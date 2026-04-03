@@ -4,3 +4,4 @@ nbsphinx
 ipykernel
 tqdm
 pandas
+scipy
