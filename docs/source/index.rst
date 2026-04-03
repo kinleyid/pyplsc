@@ -11,7 +11,7 @@ A python implementation of partial least squares correlation (PLSC).
 Installation
 ------------
 
-``pyplsc`` can be installed from pypi via:
+``pyplsc`` can be installed from PyPI via:
 
 .. code-block::
 
