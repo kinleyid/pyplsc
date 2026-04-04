@@ -105,8 +105,7 @@ class BaseClass():
         labels = labels[which]
         # Output is currently a dataframe, corresponding to output='frame'
         if output == 'frame':
-            # TODO: reset index
-            pass
+            labels = labels.reset_index(drop=True)
         else:
             tuple_list = pd.MultiIndex.from_frame(labels).to_list()
             if output == 'tuple-list':
@@ -196,6 +195,40 @@ class BaseClass():
             sals = sals[:, lv_idx]
         data_scores = data @ sals
         return data_scores
+    def get_scores_frame(self, lv_idx=None):
+        """
+        Get dataframe containing design and data scores
+
+        Parameters
+        ----------
+        lv_idx : indexer, optional
+            Index of latent variable(s) for which to return design and data scores. The default is None, which yields all latent variables.
+
+        Returns
+        -------
+        df : pandas.dataframe
+            Dataframe containing design and data scores for each observation.
+
+        """
+        # TODO: document
+        if lv_idx is None:
+            lv_idx = list(range(self.n_lv_))
+        else:
+            try:
+                len(lv_idx)
+            except:
+                lv_idx = [lv_idx]
+        lv_idxs = lv_idx
+        lv_subdfs = []
+        for lv_idx in lv_idxs:
+            sub_df = self.design_.copy()
+            sub_df['lv_idx'] = lv_idx
+            sub_df['design_score'] = self.design_scores_[:, lv_idx]
+            sub_df['data_score'] = self.transform(lv_idx=lv_idx)
+            lv_subdfs.append(sub_df)
+        df = pd.concat(lv_subdfs)
+        df = df.reset_index(drop=True)
+        return df
     def _get_permutations(self, n_perm):
         # Get indices that can be used to permute
         rng = np.random.default_rng(self.random_state)
@@ -417,6 +450,7 @@ class BaseClass():
                 sub_df['U_CI'] = self.boot_stat_ci_[1, :, lv_idx]
             lv_subdfs.append(sub_df)
         df = pd.concat(lv_subdfs)
+        df = df.reset_index(drop=True)
         return df
         
 class BDA(BaseClass):

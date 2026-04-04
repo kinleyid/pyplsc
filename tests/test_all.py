@@ -33,6 +33,7 @@ def fit_plsc(sample_data):
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
+    fit_bda.get_scores_frame()
     fit_bda.permute(n_perm=20)
     fit_bda.bootstrap(n_boot=200)
     yerr = fit_bda.get_boot_stat_yerr(0)
@@ -134,6 +135,7 @@ def test_bda_input(sample_data):
 
 def test_plsc_basic(fit_plsc):
     assert len(fit_plsc.get_labels()) == len(fit_plsc.design_sals_)
+    fit_plsc.get_scores_frame()
     fit_plsc.permute(n_perm=2)
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
