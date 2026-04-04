@@ -34,6 +34,7 @@ def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
     fit_bda.get_scores_frame()
+    fit_bda.get_scores_frame(lv_idx=[0, 1])
     fit_bda.permute(n_perm=20)
     fit_bda.bootstrap(n_boot=200)
     yerr = fit_bda.get_boot_stat_yerr(0)
@@ -136,6 +137,7 @@ def test_bda_input(sample_data):
 def test_plsc_basic(fit_plsc):
     assert len(fit_plsc.get_labels()) == len(fit_plsc.design_sals_)
     fit_plsc.get_scores_frame()
+    fit_plsc.get_scores_frame(lv_idx=[0, 1])
     fit_plsc.permute(n_perm=2)
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
@@ -183,3 +185,10 @@ def test_plsc_designs(sample_data):
     plsc.permute(10)
     plsc.bootstrap(10)
     plsc.fit(data=data, covariates=covariates, within=within, participant=participant)
+
+def test_alt_boot_stats(sample_data):
+    data, covariates, between, within, participant = sample_data
+    # plsc = pyplsc.PLSC(boot_stat=)
+    bda = pyplsc.BDA(boot_stat='condwise-scores')
+    bda.fit(data=data, between=between)
+    bda.bootstrap(10)

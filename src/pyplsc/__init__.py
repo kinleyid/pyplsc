@@ -10,10 +10,16 @@ from . import utils
 
 from pdb import set_trace
 
+class NotFittedError(Exception):
+    def __init__(self):
+        self.message = '.fit() has not yet been called to fit model'
+        super().__init__(self.message)
+
 class BaseClass():
     # Parent class for BDA and PLSC.
     def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
+        self._fitted = False
         self._perm_done = False
         self._boot_done = False
         self._validate_resamples = validate_resamples
@@ -80,6 +86,8 @@ class BaseClass():
         --------
         >>> labels = mod.get_labels()
         """
+        if not self._fitted:
+            raise NotFittedError()
         condition_labels = self.design_[['between', 'within']].drop_duplicates()
         if isinstance(self, PLSC):
             # Create a MultiIndex from product of conditions and covariates
@@ -140,6 +148,7 @@ class BaseClass():
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
         self.data_sals_ = v
+        self._fitted = True
     def flip_signs(self, lv_idx=None):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
@@ -158,6 +167,8 @@ class BaseClass():
         >>> mod.flip_signs([0, 1]) # Flip signs for the first two   latent variables
 
         """
+        if not self._fitted:
+            raise NotFittedError()
         if lv_idx is None:
             lv_idx = range(self.n_lv_)
         self.design_sals_[:, lv_idx] *= -1
@@ -188,6 +199,8 @@ class BaseClass():
         >>> scores = mod.transform() # Get scores for data used to fit model
         >>> scores = mod.transform(new_data) # Get scores for new data
         """
+        if not self._fitted:
+            raise NotFittedError()
         if data is None:
             data = self.data_
         sals = self.data_sals_
@@ -210,7 +223,8 @@ class BaseClass():
             Dataframe containing design and data scores for each observation.
 
         """
-        # TODO: document
+        if not self._fitted:
+            raise NotFittedError()
         if lv_idx is None:
             lv_idx = list(range(self.n_lv_))
         else:
@@ -289,6 +303,8 @@ class BaseClass():
         >>> mod.permute(n_perm=1000, n_jobs=-1)
         >>> print(mod.pvals_)
         """
+        if not self._fitted:
+            raise NotFittedError()
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
         # Pre-generate perm_idx
@@ -365,6 +381,8 @@ class BaseClass():
         >>> print(mod.bootstrap_ratios_)
         >>> print(mod.boot_stat_ci[..., 0]) # Print CI of boot_stat for first LV
         """
+        if not self._fitted:
+            raise NotFittedError()
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
         self.n_boot_ = n_boot
@@ -408,6 +426,8 @@ class BaseClass():
         >>> yerr = mod.get_boot_stat_yerr(lv_idx)
         >>> matplotlib.pyplot.bar(x=x, height=height, yerr=yerr)
         """
+        if not self._fitted:
+            raise NotFittedError()
         if not self._boot_done:
             raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
         est = self.boot_stat_val_[:, lv_idx]
@@ -432,6 +452,8 @@ class BaseClass():
             :attr:`boot_stat` as a dataframe.
 
         """
+        if not self._fitted:
+            raise NotFittedError()
         if lv_idx is None:
             lv_idx = list(range(self.n_lv_))
         else:
