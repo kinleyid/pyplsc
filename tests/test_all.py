@@ -47,6 +47,9 @@ def test_bda_basic(fit_bda):
         fit_bda.bootstrap(0)    
     fit_bda.bootstrap(n_boot=2, alignment_method='flip')
     assert fit_bda.design_scores_ is not None
+    fit_bda.get_boot_stat_frame()
+    fit_bda.get_boot_stat_frame(lv_idx=0)
+    fit_bda.get_boot_stat_frame(lv_idx=[0, 1])
 
 def test_bda_labels(fit_bda):
     fit_bda.get_labels('between')
@@ -135,6 +138,9 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.bootstrap(n_boot=2)
     fit_plsc.transform(lv_idx=0)
     assert fit_plsc.design_scores_ is not None
+    fit_plsc.get_boot_stat_frame()
+    fit_plsc.get_boot_stat_frame(lv_idx=0)
+    fit_plsc.get_boot_stat_frame(lv_idx=[0, 1])
 
 def test_plsc_labels(fit_plsc):
     fit_plsc.get_labels(which='covariate')

@@ -13,9 +13,9 @@ class BaseClass():
     # Parent class for BDA and PLSC.
     def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
-        self.__perm_done = False
-        self.__boot_done = False
-        self.__validate_resamples = validate_resamples
+        self._perm_done = False
+        self._boot_done = False
+        self._validate_resamples = validate_resamples
         # Public properties
         self.svd_method = svd_method
         self.boot_stat = boot_stat
@@ -103,7 +103,10 @@ class BaseClass():
                 which.append('covariate')
         labels = labels[which]
         # Output is currently a dataframe, corresponding to output='frame'
-        if output != 'frame':
+        if output == 'frame':
+            # TODO: reset index
+            pass
+        else:
             tuple_list = pd.MultiIndex.from_frame(labels).to_list()
             if output == 'tuple-list':
                 labels = tuple_list
@@ -160,7 +163,7 @@ class BaseClass():
         self.design_sals_[:, lv_idx] *= -1
         self.data_sals_[:, lv_idx] *= -1
         self.boot_stat_val_[:, lv_idx] *= -1
-        if self.__boot_done:
+        if self._boot_done:
             self.bootstrap_ratios_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
             self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...] # TODO: check that this logic is correct
@@ -263,7 +266,7 @@ class BaseClass():
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         self.pvals_ = pvals
-        self.__perm_done = True
+        self._perm_done = True
         if return_null_dist:
             return null_dist
     def _get_resamples(self, n_boot, validate=False):
@@ -333,7 +336,7 @@ class BaseClass():
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
-        boot_idxs = self._get_resamples(n_boot, validate=self.__validate_resamples)
+        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling"))
@@ -345,7 +348,7 @@ class BaseClass():
         design_resampled = np.stack(design_resampled)
         alpha = 1 - confint_level
         self.boot_stat_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
-        self.__boot_done = True
+        self._boot_done = True
         if return_boot_dist:
             return design_resampled
     def get_boot_stat_yerr(self, lv_idx):
@@ -371,7 +374,7 @@ class BaseClass():
         >>> yerr = mod.get_boot_stat_yerr(lv_idx)
         >>> matplotlib.pyplot.bar(x=x, height=height, yerr=yerr)
         """
-        if not self.__boot_done:
+        if not self._boot_done:
             raise ValueError('Bootstrap resampling must be done to obtain confidence intervals')
         est = self.boot_stat_val_[:, lv_idx]
         if len(est.shape) == 2:
@@ -380,6 +383,40 @@ class BaseClass():
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
+    def get_boot_stat_frame(self, lv_idx=None):
+        """
+        Get :attr:`boot_stat` as a dataframe, including upper and lower confidence limits if bootstrap resampling has been done.
+
+        Parameters
+        ----------
+        lv_idx : indexer, optional
+            Index of latent variable the dataframe should cover. The default is None, which yields a dataframe covering all latent variables.
+
+        Returns
+        -------
+        df : pandas.dataframe
+            :attr:`boot_stat` as a dataframe.
+
+        """
+        if lv_idx is None:
+            lv_idx = list(range(self.n_lv_))
+        else:
+            try:
+                len(lv_idx)
+            except:
+                lv_idx = [lv_idx]
+        lv_idxs = lv_idx
+        lv_subdfs = []
+        for lv_idx in lv_idxs:
+            sub_df = self.get_labels()
+            sub_df['lv_idx'] = lv_idx
+            sub_df['stat'] = self.boot_stat_val_[:, lv_idx]
+            if self._boot_done:
+                sub_df['L_CI'] = self.boot_stat_ci_[0, :, lv_idx]
+                sub_df['U_CI'] = self.boot_stat_ci_[1, :, lv_idx]
+            lv_subdfs.append(sub_df)
+        df = pd.concat(lv_subdfs)
+        return df
         
 class BDA(BaseClass):
     """
