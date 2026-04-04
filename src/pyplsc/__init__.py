@@ -1,11 +1,12 @@
 
 import numpy as np
 from tqdm import tqdm
-from scipy.linalg import orthogonal_procrustes
 from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed
 import pandas as pd
+
+from . import utils
 
 from pdb import set_trace
 
@@ -63,7 +64,7 @@ class BaseClass():
                     design[colname] = pd.Categorical(col)
             design = design[['between', 'within', 'participant']]
         self.design_ = design
-        self.stratifier_ = _get_stratifier(design) # This is handy to pre-compute because it's used many times later on
+        self.stratifier_ = utils.get_stratifier(design) # This is handy to pre-compute because it's used many times later on
     def get_labels(self, which=None, output='frame', join=' '):
         """
         Get the labels corresponding to each row of the design saliences. For BDA, this is the between- and within-participant condition labels. For PLSC, covariate labels are also included.
@@ -532,7 +533,7 @@ class BDA(BaseClass):
         if len(np.unique(self.stratifier_)) == 1:
             raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
         # TODO: enforce one between condition per participant
-        mean_centred = _get_mean_centred(
+        mean_centred = utils.get_mean_centred(
             data=self.data_,
             design=self.design_,
             stratifier=self.stratifier_,
@@ -544,12 +545,12 @@ class BDA(BaseClass):
             val = mean_centred @ self.data_sals_
         elif self.boot_stat == 'condwise-scores':
             data_scores = self.transform()
-            val = _get_groupwise_means(data_scores, self.stratifier_)
+            val = utils.get_groupwise_means(data_scores, self.stratifier_)
         self.boot_stat_val_ = val
         return self
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
-        mean_centred = _get_mean_centred(
+        mean_centred = utils.get_mean_centred(
             data=self.data_,
             design=self.design_.iloc[perm_idx],
             stratifier=self.stratifier_[perm_idx],
@@ -561,20 +562,20 @@ class BDA(BaseClass):
         resampled_data = self.data_[resample_idx]
         resampled_design = self.design_.iloc[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
-        mean_centred = _get_mean_centred(
+        mean_centred = utils.get_mean_centred(
             data=resampled_data,
             design=resampled_design,
             stratifier=resampled_strat,
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
-        v = _align(v, self.data_sals_, alignment_method)
+        v = utils.align(v, self.data_sals_, alignment_method)
         resampled_data_sals = v @ np.diag(s)
         # Brain scores
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = mean_centred @ self.data_sals_
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
-            boot_stat = _get_groupwise_means(scores, resampled_strat)
+            boot_stat = utils.get_groupwise_means(scores, resampled_strat)
         return boot_stat, resampled_data_sals
   
 class PLSC(BaseClass):
@@ -662,8 +663,8 @@ class PLSC(BaseClass):
         design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
         # Align the observationsn with the design saliences, level-wises
         sal_labels = self.get_labels()
-        sal_levels = _get_stratifier(sal_labels, output='tuples')
-        obs_levels = _get_stratifier(self.design_, output='tuples')
+        sal_levels = utils.get_stratifier(sal_labels, output='tuples')
+        obs_levels = utils.get_stratifier(self.design_, output='tuples')
         for curr_lvl in set(obs_levels):
             obs_mask = [i for i, obs_lvl in enumerate(obs_levels) if obs_lvl == curr_lvl]
             sal_mask = [i for i, sal_lvl in enumerate(sal_levels) if sal_lvl == curr_lvl]
@@ -706,7 +707,7 @@ class PLSC(BaseClass):
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
-        R = _get_stacked_cormats(
+        R = utils.get_stacked_cormats(
             self.data_,
             self.covariates_,
             self.stratifier_)
@@ -715,11 +716,11 @@ class PLSC(BaseClass):
         # Correlation between data scores and covariates
         data_scores = self.transform()
         # TODO: update for multiple boot stats
-        self.boot_stat_val_ = _get_stacked_cormats(data_scores,
+        self.boot_stat_val_ = utils.get_stacked_cormats(data_scores,
                                                    self.covariates_,
                                                    self.stratifier_)
     def _single_permutation(self, perm_idx):
-        R = _get_stacked_cormats(
+        R = utils.get_stacked_cormats(
             self.data_,
             self.covariates_.iloc[perm_idx],
             self.stratifier_[perm_idx])
@@ -730,87 +731,18 @@ class PLSC(BaseClass):
         resampled_data = self.data_[resample_idx]
         resampled_cov = self.covariates_.iloc[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
-        R = _get_stacked_cormats(resampled_data,
+        R = utils.get_stacked_cormats(resampled_data,
                                  resampled_cov,
                                  resampled_strat)
         _, s, v = self._svd(R)
-        v = _align(v, self.data_sals_, alignment_method)
+        v = utils.align(v, self.data_sals_, alignment_method)
         resampled_data_sals = v @ np.diag(s)
         if self.boot_stat == 'score-covariate-corr':
             # Correlation between covariates and data scores
-            boot_stat = _get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
+            boot_stat = utils.get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
                                        resampled_cov,
                                        resampled_strat)
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
-            boot_stat = _get_groupwise_means(scores, resampled_strat)
+            boot_stat = utils.get_groupwise_means(scores, resampled_strat)
         return boot_stat, resampled_data_sals
-
-def _get_stratifier(design, output='ints'):
-    # Get unique combinations of between and within factors
-    multi_idx = pd.MultiIndex.from_frame(design[['between', 'within']])
-    if output == 'ints':
-        stratifier, _ = multi_idx.factorize()
-    elif output == 'tuples':
-        stratifier = multi_idx.to_list()
-    return stratifier
-
-def _pre_centre(data, design, pre_subtract):
-    # Pre-subtract between- or within-wise means if applicable
-    group_idx = design[pre_subtract].cat.codes
-    rowwise_group_means = _get_groupwise_means(data, group_idx)[group_idx]
-    return data - rowwise_group_means
-
-def _get_mean_centred(data, design, stratifier=None, pre_subtract=None):
-    if pre_subtract is not None:
-        data = _pre_centre(data, design, pre_subtract)
-    # Compute group-wise means
-    if stratifier is None: # Might not be pre-computed
-        stratifier = _get_stratifier(design)
-    groupwise_means = _get_groupwise_means(data, stratifier)
-    # Mean centre
-    mean_centred = groupwise_means - groupwise_means.mean(axis=0)
-    return mean_centred
-
-def _get_groupwise_means(data, group_idx):
-    groups = np.unique(group_idx)
-    # Initialize
-    groupwise_means = np.zeros((len(groups), data.shape[1]), dtype=data.dtype)
-    for i, group in enumerate(groups):
-        groupwise_means[i] = data[group_idx == group].mean(axis=0)
-    return groupwise_means
-
-def _get_stacked_cormats(data, covariates, stratifier):
-    submatrices = []
-    n_levels = stratifier.max() + 1
-    for level in range(n_levels):
-        idx = stratifier == level
-        submatrix = _corr(covariates[idx], data[idx])
-        submatrices.append(submatrix)
-    R = np.concat(submatrices)
-    return R
-
-def _corr(data, Y):
-    # Compute a rectangular correlation matrix between data and Y
-    datac = data - data.mean(axis=0)
-    Yc = Y - Y.mean(axis=0)
-    
-    denom = data.shape[0] - 1
-    stddata = np.sqrt((datac ** 2).sum(axis=0) / denom)
-    stdY = np.sqrt((Yc ** 2).sum(axis=0) / denom)
-    
-    datan = datac / stddata
-    Yn = Yc / stdY
-    return datan.T @ Yn / denom
-
-def _align(v, target_v, alignment_method):
-    # Align with original decomposition
-    if alignment_method == 'rotate':
-        # Via rotation
-        R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
-        aligned = v @ R
-    elif alignment_method == 'flip':
-        # Via correcting apparent sign flips
-        flips = np.sign(np.diag(v.T @ target_v))
-        aligned = v * flips
-    return aligned
