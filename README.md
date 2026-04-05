@@ -23,7 +23,7 @@ pip install pyplsc
 
 `pyplsc` replicates the statistical functionality of the [PLS Matlab package](https://www.rotman-baycrest.on.ca/index.php?section=84), much like the [`pyls`](https://github.com/netneurolab/pypyls) library. A major difference is that `pyplsc` uses a scikit-learn-style model-fitting syntax and accepts tabular (`pandas.DataFrame`) input:
 
-```
+```python
 from pyplsc import PLSC, BDA
 
 mod = PLSC(random_state=123)
@@ -32,14 +32,14 @@ mod.fit(data=data_array, covariates=cov_table)
 
 Permutation testing and bootstrap resampling are then run as separate steps (possibly in parallel using the `n_jobs` parameter):
 
-```
+```python
 perm_dist = mod.permute(n_perm=1000, n_jobs=3)
 boot_dist = mod.bootstrap(n_boot=1000)
 ```
 
 In contrast to other PLS implementations, `pyplsc` does not require data to be pre-sorted by (between-participant) group and (within-participant) condition:
 
-```
+```python
 mod = BDA()
 mod.fit(data=data_array,
 		design=design_matrix_dataframe,
@@ -48,4 +48,4 @@ mod.fit(data=data_array,
 		participant='subj')
 ```
 
-See the [documentation](https://pyplsc.readthedocs.io/) for more details.
+See the [documentation](https://pyplsc.readthedocs.io/) for more details and examples.
