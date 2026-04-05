@@ -769,12 +769,17 @@ class PLSC(BaseClass):
             self.stratifier_)
         self._initial_decomposition(R)
         self.design_scores_ = self._get_design_scores()
-        # Correlation between data scores and covariates
-        data_scores = self.transform()
-        # TODO: update for multiple boot stats
-        self.boot_stat_val_ = utils.get_stacked_cormats(data_scores,
-                                                   self.covariates_,
-                                                   self.stratifier_)
+        # Compute boot stat
+        scores = self.transform()
+        if self.boot_stat == 'score-covariate-corr':
+            # Correlation between covariates and data scores
+            val = utils.get_stacked_cormats(scores,
+                                            self.covariates_,
+                                            self.stratifier_)
+        elif self.boot_stat == 'condwise-scores':
+            # Condition-wise brain scores
+            val = utils.get_groupwise_means(scores, self.stratifier_)
+        self.boot_stat_val_ = val
     def _single_permutation(self, perm_idx):
         R = utils.get_stacked_cormats(
             self.data_,
