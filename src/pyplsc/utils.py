@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import orthogonal_procrustes
 
+from pdb import set_trace
+
 def get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors
     multi_idx = pd.MultiIndex.from_frame(design[['between', 'within']])
@@ -60,14 +62,14 @@ def get_stacked_cormats(data, covariates, stratifier):
     R = np.concat(submatrices)
     return R
 
-def align(v, target_v, alignment_method):
+def align(v, s, target_v, alignment_method):
     # Align with original decomposition
     if alignment_method == 'rotate':
         # Via rotation
         R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
-        aligned = v @ R
+        aligned = v*s @ R
     elif alignment_method == 'flip':
         # Via correcting apparent sign flips
         flips = np.sign(np.diag(v.T @ target_v))
-        aligned = v * flips
+        aligned = v*s * flips
     return aligned

@@ -9,6 +9,7 @@ import pandas as pd
 from . import utils
 
 from pdb import set_trace
+from scipy.linalg import orthogonal_procrustes
 
 class NotFittedError(Exception):
     def __init__(self):
@@ -322,6 +323,8 @@ class BaseClass():
     def _get_resamples(self, n_boot, validate=False):
         rng = np.random.default_rng(self.random_state)
         rows_by_ptpt = self.design_.groupby('participant').indices
+        # Is there a between-participants condition?
+        # If so, we'll do stratified resampling
         if self.design_['between'].nunique() > 1:
             case = 'between'
             ptpts_by_between = self.design_.groupby('between')['participant'].unique()
@@ -343,6 +346,7 @@ class BaseClass():
                     # Sample participants at random
                     resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
                 resample = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
+                resample = np.sort(resample)
                 if validate:
                     # Check for levels with only one participant
                     resampled_strat = self.stratifier_[resample]
@@ -353,7 +357,7 @@ class BaseClass():
                     validated = True
             resamples.append(resample)
         return resamples
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', return_boot_dist=False, n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', return_boot_stat_dist=False, n_jobs=1):
         """
         Perform bootstrap resampling to assess the reliability of saliences.
 
@@ -365,7 +369,7 @@ class BaseClass():
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
             Method to be used for aligning recomputed data saliences with original data saliences. `'rotate'` uses the solution to the orthogonal Proctrustes problem. `'flip'` flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is `'rotate'`.
-        return_boot_dist : bool, optional
+        return_boot_stat_dist : bool, optional
             # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
@@ -392,17 +396,19 @@ class BaseClass():
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling"))
-        design_resampled, data_resampled = zip(*boot_results)
+        boot_stats, data_resampled = zip(*boot_results)
         # Compute standard deviations for data saliences to get bootstrap ratios
         stds = np.stack(data_resampled).std(axis=0)
         self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / stds
+        # Compute standard errors
+        self.data_sals_se_ = stds/np.sqrt(n_boot)
         # Compute confidence intervals for design saliences
-        design_resampled = np.stack(design_resampled)
+        boot_stats = np.stack(boot_stats)
         alpha = 1 - confint_level
-        self.boot_stat_ci_ = np.quantile(design_resampled, [alpha/2, 1 - alpha/2], axis=0)
+        self.boot_stat_ci_ = np.quantile(boot_stats, [alpha/2, 1 - alpha/2], axis=0)
         self._boot_done = True
-        if return_boot_dist:
-            return design_resampled
+        if return_boot_stat_dist:
+            return boot_stats
     def get_boot_stat_yerr(self, lv_idx):
         """
         Get yerr for statistic named by :attr:`boot_stat` that can be passed to a matplotlib bar plot.
@@ -624,8 +630,7 @@ class BDA(BaseClass):
             stratifier=resampled_strat,
             pre_subtract=self.pre_subtract)
         _, s, v = self._svd(mean_centred)
-        v = utils.align(v, self.data_sals_, alignment_method)
-        resampled_data_sals = v @ np.diag(s)
+        resampled_data_sals = utils.align(v, s, self.data_sals_, alignment_method)
         # Brain scores
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = mean_centred @ self.data_sals_
@@ -796,8 +801,7 @@ class PLSC(BaseClass):
                                  resampled_cov,
                                  resampled_strat)
         _, s, v = self._svd(R)
-        v = utils.align(v, self.data_sals_, alignment_method)
-        resampled_data_sals = v @ np.diag(s)
+        resampled_data_sals = utils.align(v, s, self.data_sals_, alignment_method)
         if self.boot_stat == 'score-covariate-corr':
             # Correlation between covariates and data scores
             boot_stat = utils.get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
