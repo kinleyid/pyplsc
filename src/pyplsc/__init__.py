@@ -397,13 +397,7 @@ class BaseClass():
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
-        # boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
-        boot_idxs = np.stack([
-            # np.arange(120),
-            list(range(30))*2 + list(range(60, 90))*2,
-            list(range(30, 60))*2 + list(range(90, 120))*2,
-            ])
-        boot_idxs = list(boot_idxs)
+        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling"))
