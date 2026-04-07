@@ -1,9 +1,26 @@
 
 import numpy as np
 import pandas as pd
-from scipy.linalg import orthogonal_procrustes
 
 from pdb import set_trace
+
+def get_design_for_sorted(group_sizes, n_cond=1):
+    between = []
+    within = []
+    participant = []
+    min_ptpt_id = 0
+    for group_id, group_size in enumerate(group_sizes):
+        between += [group_id]*group_size*n_cond
+        for cond_id in range(n_cond):
+            within += [cond_id]*group_size
+            participant += list(range(min_ptpt_id, min_ptpt_id + group_size))
+        min_ptpt_id += group_size
+    
+    design = pd.DataFrame({
+        'between': between,
+        'within': within,
+        'participant': participant})
+    return design
 
 def get_stratifier(design, output='ints'):
     # Get unique combinations of between and within factors
@@ -61,15 +78,3 @@ def get_stacked_cormats(data, covariates, stratifier):
         submatrices.append(submatrix)
     R = np.concat(submatrices)
     return R
-
-def align(v, s, target_v, alignment_method):
-    # Align with original decomposition
-    if alignment_method == 'rotate':
-        # Via rotation
-        R, _ = orthogonal_procrustes(v, target_v, check_finite=False)
-        aligned = v*s @ R
-    elif alignment_method == 'flip':
-        # Via correcting apparent sign flips
-        flips = np.sign(np.diag(v.T @ target_v))
-        aligned = v*s * flips
-    return aligned

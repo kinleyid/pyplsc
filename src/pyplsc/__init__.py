@@ -357,9 +357,9 @@ class BaseClass():
                     validated = True
             resamples.append(resample)
         return resamples
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate', return_boot_stat_dist=False, n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=False, n_jobs=1):
         """
-        Perform bootstrap resampling to assess the reliability of saliences.
+        Perform (stratified) bootstrap resampling to assess the reliability of the data saliences.
 
         Parameters
         ----------
@@ -368,7 +368,12 @@ class BaseClass():
         confint_level : float, optional
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
-            Method to be used for aligning recomputed data saliences with original data saliences. `'rotate'` uses the solution to the orthogonal Proctrustes problem. `'flip'` flips the signs of the resampled saliences so that their inner products with original saliences are positive. The default is `'rotate'`.
+            Method to be used for aligning recomputed data saliences with original data saliences. Must be one of: `'rotate-design-sals'` and `'rotate-data-sals'` use the solution to the orthogonal Proctrustes problem to align the recomputed design or data saliences, respectively, with the originals. `'flip-signs'` flips the signs of the resampled data saliences so that their inner products with original saliences are positive. The default is `'rotate-design-sals'`.
+            
+            - ``'rotate-design-sals'`` (default): Find the rotation that solves the orthogonal procrustes problem to align the recomputed and original design saliences, then apply this to the recomputed data saliences. This is the what is computed in the original Matlab version of PLS.
+            - ``'rotate-data-sals'``: Find the rotation that solves the orthogonal procrustes problem to align the recomputed and original data saliences, then apply this to the recomputed data saliences.
+            - ``'flip-design-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original design saliences are positive, then apply these sign flips to the recomputed data saliences.
+            - ``'flip-data-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original data saliences are positive, then apply these sign flips to the recomputed data saliences.
         return_boot_stat_dist : bool, optional
             # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
         n_jobs : int, optional
@@ -392,7 +397,13 @@ class BaseClass():
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
-        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
+        # boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
+        boot_idxs = np.stack([
+            # np.arange(120),
+            list(range(30))*2 + list(range(60, 90))*2,
+            list(range(30, 60))*2 + list(range(90, 120))*2,
+            ])
+        boot_idxs = list(boot_idxs)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling"))
@@ -409,6 +420,17 @@ class BaseClass():
         self._boot_done = True
         if return_boot_stat_dist:
             return boot_stats
+    def _align(self, u, s, v, method):
+        if method == 'rotate-data-sals':
+            A, _ = orthogonal_procrustes(v, self.data_sals_, check_finite=False)
+        elif method == 'rotate-design-sals':
+            A, _ = orthogonal_procrustes(u, self.design_sals_, check_finite=False)
+        elif method == 'flip-data-sals':
+            A = np.sign(np.diag(v.T @ self.data_sals_))
+        elif method == 'flip-design-sals':
+            A = np.sign(np.diag(u.T @ self.design_sals_))
+        aligned = v*s @ A
+        return aligned
     def get_boot_stat_yerr(self, lv_idx):
         """
         Get yerr for statistic named by :attr:`boot_stat` that can be passed to a matplotlib bar plot.
@@ -492,7 +514,7 @@ class BDA(BaseClass):
     boot_stat : str, optional
         Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
-        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original version of PLS.
+        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
     svd_method : str, optional
         Method to use for singular value decomposition. Must be one of:
@@ -621,6 +643,7 @@ class BDA(BaseClass):
         return s
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
+        set_trace()
         resampled_data = self.data_[resample_idx]
         resampled_design = self.design_.iloc[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
@@ -629,8 +652,8 @@ class BDA(BaseClass):
             design=resampled_design,
             stratifier=resampled_strat,
             pre_subtract=self.pre_subtract)
-        _, s, v = self._svd(mean_centred)
-        resampled_data_sals = utils.align(v, s, self.data_sals_, alignment_method)
+        u, s, v = self._svd(mean_centred)
+        resampled_data_sals = self._align(u, s, v, alignment_method)
         # Brain scores
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = mean_centred @ self.data_sals_
@@ -648,7 +671,7 @@ class PLSC(BaseClass):
     boot_stat : str, optional
         Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
-        - ``'score-covariate-corr'`` (default): Correlations between covariates and scores (i.e., output of :meth:`transform`). Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original version of PLS.
+        - ``'score-covariate-corr'`` (default): Correlations between covariates and scores (i.e., output of :meth:`transform`). Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original Matlab version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
     svd_method : str, optional
         Method to use for singular value decomposition. Must be one of:
@@ -722,7 +745,7 @@ class PLSC(BaseClass):
     def _get_design_scores(self):
         # Initialize
         design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
-        # Align the observationsn with the design saliences, level-wises
+        # Align the observations with the design saliences, level-wises
         sal_labels = self.get_labels()
         sal_levels = utils.get_stratifier(sal_labels, output='tuples')
         obs_levels = utils.get_stratifier(self.design_, output='tuples')
@@ -800,8 +823,8 @@ class PLSC(BaseClass):
         R = utils.get_stacked_cormats(resampled_data,
                                  resampled_cov,
                                  resampled_strat)
-        _, s, v = self._svd(R)
-        resampled_data_sals = utils.align(v, s, self.data_sals_, alignment_method)
+        u, s, v = self._svd(R)
+        resampled_data_sals = self._align(u, s, v, self.data_sals_)
         if self.boot_stat == 'score-covariate-corr':
             # Correlation between covariates and data scores
             boot_stat = utils.get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
