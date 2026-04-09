@@ -18,9 +18,9 @@ def get_design_for_sorted(group_sizes, n_cond=1):
         min_ptpt_id += group_size
     
     design = pd.DataFrame({
-        'between': between,
-        'within': within,
-        'participant': participant})
+        'between': pd.Categorical(between),
+        'within': pd.Categorical(within),
+        'participant': pd.Categorical(participant)})
     return design
 
 def get_stratifier(design, output='ints'):

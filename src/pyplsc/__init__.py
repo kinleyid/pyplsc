@@ -5,7 +5,7 @@ from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import copy
 
 from . import utils
 
@@ -35,6 +35,7 @@ class BaseClass():
         if not isinstance(data, np.ndarray):
             valid_data = False
         else:
+            data = data.copy()
             if data.ndim == 1:
                 # Reshape to column array
                 data = data.reshape((len(data), 1))
@@ -66,6 +67,7 @@ class BaseClass():
             design = pd.DataFrame(design)
         else:
             # Scenario 2: dataframe but also possibly columns provided individually
+            design = design.copy()
             for colname, col in cols.items():
                 if col is None:
                     design[colname] = null_col.copy()
@@ -269,7 +271,7 @@ class BaseClass():
             else:
                 # There is a within-participants factor
                 # Create a copy to shuffle
-                rows_by_ptpt = unshuffled_rows_by_ptpt.copy()
+                rows_by_ptpt = copy.deepcopy(unshuffled_rows_by_ptpt)
                 # Shuffle within-participant condition
                 for rows in rows_by_ptpt.values():
                     rng.shuffle(rows)
