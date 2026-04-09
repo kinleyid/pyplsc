@@ -1,6 +1,7 @@
 
 import numpy as np
 import pandas as pd
+from scipy.stats import zscore
 
 from pdb import set_trace
 
@@ -39,35 +40,38 @@ def get_groupwise_means(data, group_idx):
         groupwise_means[i] = data[group_idx == group].mean(axis=0)
     return groupwise_means
 
-def pre_centre(data, design, pre_subtract):
-    # Pre-subtract between- or within-wise means if applicable
-    group_idx = design[pre_subtract].cat.codes
+def pre_centre(data, design, pre_subtract, stratifier):
+    if pre_subtract == 'both':
+        set_trace()
+        group_idx = stratifier # Conjunction of between and within conditions
+    else:
+        # Pre-subtract between- or within-wise means if applicable
+        group_idx = design[pre_subtract].cat.codes
     rowwise_group_means = get_groupwise_means(data, group_idx)[group_idx]
     return data - rowwise_group_means
 
 def get_mean_centred(data, design, stratifier=None, pre_subtract=None):
-    if pre_subtract is not None:
-        data = pre_centre(data, design, pre_subtract)
-    # Compute group-wise means
     if stratifier is None: # Might not be pre-computed
         stratifier = get_stratifier(design)
+    if pre_subtract is not None:
+        data = pre_centre(data, design, pre_subtract, stratifier)
+    # Compute group-wise means
     groupwise_means = get_groupwise_means(data, stratifier)
     # Mean centre
     mean_centred = groupwise_means - groupwise_means.mean(axis=0)
     return mean_centred
 
-def corr(data, Y):
+def corr(cov, data):
     # Compute a rectangular correlation matrix between data and Y
-    datac = data - data.mean(axis=0)
-    Yc = Y - Y.mean(axis=0)
-    
-    denom = data.shape[0] - 1
-    stddata = np.sqrt((datac ** 2).sum(axis=0) / denom)
-    stdY = np.sqrt((Yc ** 2).sum(axis=0) / denom)
-    
-    datan = datac / stddata
-    Yn = Yc / stdY
-    return datan.T @ Yn / denom
+    # z-score data and covariate
+    data_z = (data - data.mean(axis=0)) / data.std(axis=0, ddof=1)
+    cov_z = (cov - cov.mean(axis=0)) / cov.std(axis=0, ddof=1)
+    return (cov_z.T @ data_z) / (len(data_z) - 1)
+
+def corr_(Y, data):
+    # Compute a rectangular correlation matrix between data and Y
+    xprod = zscore(Y, ddof=1).T @ zscore(data, ddof=1)  / (data.shape[0] - 1)
+    return xprod
 
 def get_stacked_cormats(data, covariates, stratifier):
     submatrices = []

@@ -5,6 +5,7 @@ from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed
 import pandas as pd
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from . import utils
 
@@ -34,10 +35,13 @@ class BaseClass():
         if not isinstance(data, np.ndarray):
             valid_data = False
         else:
-            if not data.ndim == 2:
+            if data.ndim == 1:
+                # Reshape to column array
+                data = data.reshape((len(data), 1))
+            elif data.ndim != 2:
                 valid_data = False
         if not valid_data:
-            raise ValueError('data must be a 2-dimensional numpy array')
+            raise ValueError('data must be a 1- or 2-dimensional numpy array')
         self.data_ = data
     def _setup_design_matrix(self, design=None, between=None, within=None, participant=None):
         # Add design_matrix_ and stratifier_ as properties
@@ -93,7 +97,7 @@ class BaseClass():
         if isinstance(self, PLSC):
             # Create a MultiIndex from product of conditions and covariates
             index = pd.MultiIndex.from_product(
-                [condition_labels.index, self.covariates_.columns],
+                [condition_labels.index, self.covariate_names_],
                 names=['condition_combo', 'covariate']
             )
             
@@ -398,12 +402,19 @@ class BaseClass():
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
         boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
+        # boot_idxs = np.stack([
+        #     np.arange(120),
+        #     list(range(30))*2 + list(range(60, 90))*2,
+        #     list(range(30, 60))*2 + list(range(90, 120))*2,
+        #     ])
+        # boot_idxs = list(boot_idxs)
         boot_results = Parallel(n_jobs=n_jobs)(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in tqdm(boot_idxs, desc="Resampling"))
         boot_stats, data_resampled = zip(*boot_results)
         # Compute standard deviations for data saliences to get bootstrap ratios
         stds = np.stack(data_resampled).std(axis=0)
+        
         self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / stds
         # Compute standard errors
         self.data_sals_se_ = stds/np.sqrt(n_boot)
@@ -504,7 +515,11 @@ class BDA(BaseClass):
     Parameters
     ----------
     pre_subtract : str
-        Form of pre-subtraction to do.
+        Form of pre-subtraction to do. Must be one of:
+            
+        - ``'none'``:
+        - ``'between'``: 
+        - ``'within'``: 
     boot_stat : str, optional
         Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
@@ -637,7 +652,6 @@ class BDA(BaseClass):
         return s
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
-        set_trace()
         resampled_data = self.data_[resample_idx]
         resampled_design = self.design_.iloc[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
@@ -647,7 +661,7 @@ class BDA(BaseClass):
             stratifier=resampled_strat,
             pre_subtract=self.pre_subtract)
         u, s, v = self._svd(mean_centred)
-        resampled_data_sals = self._align(u, s, v, alignment_method)
+        resampled_data_sals = self._align(u, s, v, method=alignment_method)
         # Brain scores
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = mean_centred @ self.data_sals_
@@ -725,17 +739,22 @@ class PLSC(BaseClass):
                          validate_resamples=True)
     def _setup_covariates(self, design, covariates):
         if isinstance(covariates, np.ndarray):
-            covariates = pd.DataFrame(covariates)
-            covariates.columns = ['cov%s' % col for col in covariates.columns]
+            if covariates.ndim == 1:
+                # Reshape to column array
+                covariates = covariates.reshape((len(covariates), 1))
+            covariate_array = covariates
+            covariate_names = ['cov%s' % i for i in range(covariates.shape[1])]
         else:
             if not isinstance(covariates, pd.DataFrame):
                 try:
-                    covariates = design[covariates]
+                    covariate_array = design[covariates].to_numpy()
+                    covariate_names = covariates
                 except:
                     raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
         if len(covariates) != len(self.data_):
             raise ValueError('Must be as many covariate rows as data rows')
-        self.covariates_ = covariates
+        self.covariates_ = covariate_array
+        self.covariate_names_ = covariate_names
     def _get_design_scores(self):
         # Initialize
         design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
@@ -746,10 +765,10 @@ class PLSC(BaseClass):
         for curr_lvl in set(obs_levels):
             obs_mask = [i for i, obs_lvl in enumerate(obs_levels) if obs_lvl == curr_lvl]
             sal_mask = [i for i, sal_lvl in enumerate(sal_levels) if sal_lvl == curr_lvl]
-            obs_submat = self.covariates_.to_numpy()[obs_mask]
+            obs_submat = self.covariates_[obs_mask]
             sal_submat = self.design_sals_[sal_mask]
             # Ensure each covariate is being multiplied by the appropriate salience
-            assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariates_.columns)
+            assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariate_names_)
             design_scores[obs_mask] = obs_submat @ sal_submat
         return design_scores
     def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
@@ -812,18 +831,18 @@ class PLSC(BaseClass):
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
         # Run decomposition
         resampled_data = self.data_[resample_idx]
-        resampled_cov = self.covariates_.iloc[resample_idx]
+        resampled_cov = self.covariates_[resample_idx]
         resampled_strat = self.stratifier_[resample_idx]
         R = utils.get_stacked_cormats(resampled_data,
-                                 resampled_cov,
-                                 resampled_strat)
+                                      resampled_cov,
+                                      resampled_strat)
         u, s, v = self._svd(R)
-        resampled_data_sals = self._align(u, s, v, self.data_sals_)
+        resampled_data_sals = self._align(u, s, v, method=alignment_method)
         if self.boot_stat == 'score-covariate-corr':
             # Correlation between covariates and data scores
             boot_stat = utils.get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
-                                       resampled_cov,
-                                       resampled_strat)
+                                                  resampled_cov,
+                                                  resampled_strat)
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
             boot_stat = utils.get_groupwise_means(scores, resampled_strat)
