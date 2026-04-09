@@ -403,29 +403,29 @@ class BaseClass():
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
         boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
-        # boot_idxs = np.stack([
-        #     np.arange(120),
-        #     list(range(30))*2 + list(range(60, 90))*2,
-        #     list(range(30, 60))*2 + list(range(90, 120))*2,
-        #     ])
-        # boot_idxs = list(boot_idxs)
         # Run bootstraps in parallel
+        # Set up container for boot_stat
         boot_stat_dist = []
-        sum_data_sals = np.zeros_like(self.data_sals_)
-        sum2_data_sals = np.zeros_like(self.data_sals_)
+        # Set up variables for Welford's algorithm
+        old_mean = np.zeros_like(self.data_sals_)
+        mean = np.zeros_like(self.data_sals_)
+        M2 = np.zeros_like(self.data_sals_)
         results = Parallel(n_jobs=n_jobs, prefer="threads", return_as="generator")(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
             for boot_idx in boot_idxs
         )
+        count = 0
         for boot_stat, resampled_data_sals in tqdm(results, total=n_boot, desc='Resampling'):
             boot_stat_dist.append(boot_stat)
-            sum_data_sals  += resampled_data_sals
-            sum2_data_sals += resampled_data_sals ** 2
-        # Compute standard errors for data saliences to get bootstrap ratios
-        sum_data_sals2 = (sum_data_sals**2) / n_boot
-        se_data_sals = np.sqrt(np.maximum(sum2_data_sals - sum_data_sals2, 0) / (n_boot - 1))
-        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / se_data_sals
-        self.data_sals_se_ = se_data_sals
+            # Welford's algorithm
+            count += 1
+            old_mean[:] = mean
+            mean += (resampled_data_sals - old_mean) / count
+            M2 += (resampled_data_sals - old_mean) * (resampled_data_sals - mean)
+        # Compute standard deviations for data saliences to get bootstrap ratios
+        std_data_sals = np.sqrt(M2 / (n_boot - 1))
+        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
+        self.data_sals_std_ = std_data_sals
         # Compute confidence intervals for design saliences
         boot_stats = np.stack(boot_stat_dist)
         alpha = 1 - confint_level
