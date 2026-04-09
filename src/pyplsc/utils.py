@@ -68,11 +68,6 @@ def corr(cov, data):
     cov_z = (cov - cov.mean(axis=0)) / cov.std(axis=0, ddof=1)
     return (cov_z.T @ data_z) / (len(data_z) - 1)
 
-def corr_(Y, data):
-    # Compute a rectangular correlation matrix between data and Y
-    xprod = zscore(Y, ddof=1).T @ zscore(data, ddof=1)  / (data.shape[0] - 1)
-    return xprod
-
 def get_stacked_cormats(data, covariates, stratifier):
     submatrices = []
     n_levels = stratifier.max() + 1

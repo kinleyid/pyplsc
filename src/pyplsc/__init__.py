@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -398,6 +398,7 @@ class BaseClass():
             raise NotFittedError()
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
+        n_jobs = effective_n_jobs(n_jobs)
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
@@ -408,18 +409,25 @@ class BaseClass():
         #     list(range(30, 60))*2 + list(range(90, 120))*2,
         #     ])
         # boot_idxs = list(boot_idxs)
-        boot_results = Parallel(n_jobs=n_jobs)(
+        # Run bootstraps in parallel
+        boot_stat_dist = []
+        sum_data_sals = np.zeros_like(self.data_sals_)
+        sum2_data_sals = np.zeros_like(self.data_sals_)
+        results = Parallel(n_jobs=n_jobs, prefer="threads", return_as="generator")(
             delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
-            for boot_idx in tqdm(boot_idxs, desc="Resampling"))
-        boot_stats, data_resampled = zip(*boot_results)
-        # Compute standard deviations for data saliences to get bootstrap ratios
-        stds = np.stack(data_resampled).std(axis=0)
-        
-        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / stds
-        # Compute standard errors
-        self.data_sals_se_ = stds/np.sqrt(n_boot)
+            for boot_idx in boot_idxs
+        )
+        for boot_stat, resampled_data_sals in tqdm(results, total=n_boot, desc='Resampling'):
+            boot_stat_dist.append(boot_stat)
+            sum_data_sals  += resampled_data_sals
+            sum2_data_sals += resampled_data_sals ** 2
+        # Compute standard errors for data saliences to get bootstrap ratios
+        sum_data_sals2 = (sum_data_sals**2) / n_boot
+        se_data_sals = np.sqrt(np.maximum(sum2_data_sals - sum_data_sals2, 0) / (n_boot - 1))
+        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / se_data_sals
+        self.data_sals_se_ = se_data_sals
         # Compute confidence intervals for design saliences
-        boot_stats = np.stack(boot_stats)
+        boot_stats = np.stack(boot_stat_dist)
         alpha = 1 - confint_level
         self.boot_stat_ci_ = np.quantile(boot_stats, [alpha/2, 1 - alpha/2], axis=0)
         self._boot_done = True
@@ -824,7 +832,7 @@ class PLSC(BaseClass):
     def _single_permutation(self, perm_idx):
         R = utils.get_stacked_cormats(
             self.data_,
-            self.covariates_.iloc[perm_idx],
+            self.covariates_[perm_idx],
             self.stratifier_[perm_idx])
         s = self._svd(R, compute_uv=False)
         return s
