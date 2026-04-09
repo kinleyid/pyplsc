@@ -759,7 +759,7 @@ class PLSC(BaseClass):
                     covariate_names = covariates
                 except:
                     raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
-        if len(covariates) != len(self.data_):
+        if len(covariate_array) != len(self.data_):
             raise ValueError('Must be as many covariate rows as data rows')
         self.covariates_ = covariate_array
         self.covariate_names_ = covariate_names

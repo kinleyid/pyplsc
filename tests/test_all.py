@@ -47,7 +47,7 @@ def test_bda_basic(fit_bda):
         fit_bda.permute(0)
     with pytest.raises(Exception):
         fit_bda.bootstrap(0)    
-    fit_bda.bootstrap(n_boot=2, alignment_method='flip')
+    fit_bda.bootstrap(n_boot=2, alignment_method='flip-data-sals')
     assert fit_bda.design_scores_ is not None
     fit_bda.get_boot_stat_frame()
     fit_bda.get_boot_stat_frame(lv_idx=0)
@@ -169,7 +169,7 @@ def test_plsc_input(sample_data):
              between='b', within='w', participant='p')
     plsc.fit(data=data, design=design, covariates=covariates,
              between='b', within='w', participant=participant)
-    cov_names = plsc.covariates_.columns
+    cov_names = plsc.covariate_names_
     for i, name in enumerate(cov_names):
         design[name] = covariates[:, i]
     plsc.fit(data=data, design=design, covariates=cov_names,
