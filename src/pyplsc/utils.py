@@ -33,33 +33,12 @@ def get_stratifier(design, output='ints'):
     return stratifier
 
 def get_groupwise_means(data, group_idx):
-    groups = np.unique(group_idx)
     # Initialize
-    groupwise_means = np.zeros((len(groups), data.shape[1]), dtype=data.dtype)
-    for i, group in enumerate(groups):
-        groupwise_means[i] = data[group_idx == group].mean(axis=0)
+    n_groups = group_idx.max() + 1
+    groupwise_means = np.zeros((n_groups, data.shape[1]), dtype=data.dtype)
+    for i in range(n_groups):
+        groupwise_means[i] = data[group_idx == i].mean(axis=0)
     return groupwise_means
-
-def pre_centre(data, design, pre_subtract, stratifier):
-    if pre_subtract == 'both':
-        set_trace()
-        group_idx = stratifier # Conjunction of between and within conditions
-    else:
-        # Pre-subtract between- or within-wise means if applicable
-        group_idx = design[pre_subtract].cat.codes
-    rowwise_group_means = get_groupwise_means(data, group_idx)[group_idx]
-    return data - rowwise_group_means
-
-def get_mean_centred(data, design, stratifier=None, pre_subtract=None):
-    if stratifier is None: # Might not be pre-computed
-        stratifier = get_stratifier(design)
-    if pre_subtract is not None:
-        data = pre_centre(data, design, pre_subtract, stratifier)
-    # Compute group-wise means
-    groupwise_means = get_groupwise_means(data, stratifier)
-    # Mean centre
-    mean_centred = groupwise_means - groupwise_means.mean(axis=0)
-    return mean_centred
 
 def corr(cov, data):
     # Compute a rectangular correlation matrix between data and Y

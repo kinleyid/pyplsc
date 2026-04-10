@@ -78,61 +78,6 @@ class BaseClass():
             design = design[['between', 'within', 'participant']]
         self.design_ = design
         self.stratifier_ = utils.get_stratifier(design) # This is handy to pre-compute because it's used many times later on
-    def get_labels(self, which=None, output='frame', join=' '):
-        """
-        Get the labels corresponding to each row of the design saliences. For BDA, this is the between- and within-participant condition labels. For PLSC, covariate labels are also included.
-        
-        # TODO: document output and join args
-
-        Returns
-        -------
-        labels : pandas.DataFrame
-            A dataframe with one column corresponding to each label and one row corresponding to each row of the design saliences.
-
-        Examples
-        --------
-        >>> labels = mod.get_labels()
-        """
-        if not self._fitted:
-            raise NotFittedError()
-        condition_labels = self.design_[['between', 'within']].drop_duplicates()
-        if isinstance(self, PLSC):
-            # Create a MultiIndex from product of conditions and covariates
-            index = pd.MultiIndex.from_product(
-                [condition_labels.index, self.covariate_names_],
-                names=['condition_combo', 'covariate']
-            )
-            
-            # Build the expanded dataframe
-            labels = (
-                condition_labels
-                .loc[index.get_level_values('condition_combo')]  # repeat each combo row
-                .reset_index(drop=True)
-                .assign(covariate=index.get_level_values('covariate'))
-            )
-        else:
-            labels = condition_labels
-        # Extract subset of labels
-        if which is None:
-            which = ['between', 'within']
-            if isinstance(self, PLSC):
-                which.append('covariate')
-        labels = labels[which]
-        # Output is currently a dataframe, corresponding to output='frame'
-        if output == 'frame':
-            labels = labels.reset_index(drop=True)
-        else:
-            tuple_list = pd.MultiIndex.from_frame(labels).to_list()
-            if output == 'tuple-list':
-                labels = tuple_list
-            elif output == 'str':
-                labels = []
-                for tup in tuple_list:
-                    # Convert to strings
-                    tup = [str(item) for item in tup]
-                    # Join
-                    labels.append(join.join(tup))
-        return labels
     def _svd(self, M, compute_uv=True):
         # Single function to perform svd using the specified method
         if self.svd_method == 'lapack':
@@ -156,6 +101,51 @@ class BaseClass():
         self.design_sals_ = u
         self.data_sals_ = v
         self._fitted = True
+    def _get_design_sal_labels(self):
+        """
+        # TODO: move this documentation to the attribute doc
+        Get the labels corresponding to each row of the design saliences. For BDA, each row corresponds to a combination of the between- and within-participant conditions. For PLSC, eqch row additionally corresponds to a covariate.
+        
+        Parameters
+        ----------
+        which : indexer
+            Specifies which labels should be returned. Can be "between", "within", and "covariate" (for PLSC) or an iterable containing a combination of these.
+        
+        Returns
+        -------
+        labels : pandas.DataFrame
+            A dataframe with one column corresponding to each label and one row corresponding to each row of the design saliences.
+
+        Examples
+        --------
+        >>> labels = mod.get_labels()
+        >>> btwn_labels = mod.get_labels('between')
+        >>> cond_labels = mod.get_labels(['between', 'within'])
+        """
+        condition_labels = self.design_[['between', 'within']].drop_duplicates()
+        if isinstance(self, PLSC):
+            # Create a MultiIndex from product of conditions and covariates
+            index = pd.MultiIndex.from_product(
+                [condition_labels.index, self.covariate_names_],
+                names=['condition_combo', 'covariate']
+            )
+            
+            # Build the expanded dataframe
+            labels = (
+                condition_labels
+                .loc[index.get_level_values('condition_combo')]  # repeat each combo row
+                .reset_index(drop=True)
+                .assign(covariate=index.get_level_values('covariate'))
+            )
+        else:
+            labels = condition_labels
+        # Extract subset of labels
+        which = ['between', 'within']
+        if isinstance(self, PLSC):
+            which.append('covariate')
+        labels = labels[which]
+        labels = labels.reset_index(drop=True)
+        return labels
     def flip_signs(self, lv_idx=None):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
@@ -187,12 +177,12 @@ class BaseClass():
             self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...] # TODO: check that this logic is correct
     def transform(self, data=None, lv_idx=None):
         """
-        Compute scores, i.e., coordinates of data in the new basis defined by the latent variables.
+        Compute data scores, i.e., coordinates of array data in the new basis defined by the latent variables, by multiplying a data array by the data saliences (the :attr:`data_sals_` property)
 
         Parameters
         ----------
         data : numpy.ndarray, optional
-            Data to transform. The default is None, which yields scores for the data on which the model was fit.
+            Data to transform. The default is None, which yields scores for the data on which the model was fit (the :attr:`data_` property).
         lv_idx : indexer, optional
             Index of latent variable(s) for which to compute scores. Default is None, which computes scores for all latent variables.
 
@@ -217,12 +207,12 @@ class BaseClass():
         return data_scores
     def get_scores_frame(self, lv_idx=None):
         """
-        Get dataframe containing design and data scores
+        Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the design matrix (:attr:`design_`). Data is in long format, with a column specifying the latent variable corresponding to each score.
 
         Parameters
         ----------
         lv_idx : indexer, optional
-            Index of latent variable(s) for which to return design and data scores. The default is None, which yields all latent variables.
+            Index of latent variable(s) for which to include design and data scores. The default is None, which includes scores for all latent variables.
 
         Returns
         -------
@@ -322,6 +312,9 @@ class BaseClass():
         )
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
+        if isinstance(self, BDA):
+            # Mean-centering reduces the rank by 1; there are really only (n. groups - 1) degrees of freedom.
+            pvals[self.stratifier_.max():] = np.nan
         self.pvals_ = pvals
         self._perm_done = True
         if return_null_dist:
@@ -463,7 +456,7 @@ class BaseClass():
         Examples
         --------
         >>> # Make bar plot of boot_stat
-        >>> x = mod.get_labels()['between']
+        >>> x = mod.get_labels('between')
         >>> lv_idx = 0 # First latent variable
         >>> height = mod.boot_stat_val_[:, lv_idx]
         >>> yerr = mod.get_boot_stat_yerr(lv_idx)
@@ -517,168 +510,6 @@ class BaseClass():
         df = pd.concat(lv_subdfs)
         df = df.reset_index(drop=True)
         return df
-        
-class BDA(BaseClass):
-    """
-    Barycentric discriminant analysis model, also known as mean-centred PLS. Used for analyzing condition-wise differences.
-    
-    Parameters
-    ----------
-    pre_subtract : str
-        Form of pre-subtraction to do. Must be one of:
-            
-        - ``'none'``:
-        - ``'between'``: 
-        - ``'within'``: 
-    boot_stat : str, optional
-        Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
-
-        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
-        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
-    svd_method : str, optional
-        Method to use for singular value decomposition. Must be one of:
-            
-        - ``'lapack'`` (default): use ``numpy.linalg.svd``.
-        - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
-    random_state : int, optional
-        Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
-    
-    Attributes
-    ----------
-    boot_stat : str
-        Name of statistic whose distribution is derived during bootstrap resampling.
-    boot_stat_val_ : numpy.ndarray
-        Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
-    boot_stat_ci_ : numpy.ndarray
-        Confidence interval on :attr:`boot_stat_val_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
-    bootstrap_ratios_ : numpy.ndarray
-        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
-    confint_level_ : float
-        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
-    data_ : numpy.ndarray
-        Data used to fit model.
-    data_sals_ : numpy.ndarray
-        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
-    design_ : pandas.DataFrame
-        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
-    design_sals_ : numpy.ndarray
-        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
-    design_scores_ : numpy.ndarray
-        Design scores for the data used to fit the model. Set by :meth:`fit`.
-    n_boot_ : int
-        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
-    n_lv_ : int
-        Number of latent variables in the model. Set by :meth:`fit`.
-    pre_subtract : str
-        Pre-centering method used when computing mean-centred data.
-    pvals_ : numpy.ndarray
-        Permutation p values for the latent variables. Set by :meth:`permute`.
-    random_state : int
-        Random state for reproducible permutation and bootstrap resampling.
-    singular_vals_ : numpy.ndarray
-        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
-    stratifier_ : numpy.ndarray
-        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
-    svd_method : str
-        Method to use for SVD.
-    variance_explained_
-        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
-    """
-    def __init__(self, pre_subtract=None, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
-        super().__init__(svd_method=svd_method,
-                         boot_stat=boot_stat,
-                         random_state=random_state,
-                         validate_resamples=False)
-        self.pre_subtract = pre_subtract
-    def fit(self, data, design=None, between=None, within=None, participant=None):
-        """
-        Fit a barycentric discriminant analysis model.
-
-        Parameters
-        ----------
-        data : numpy.ndarray
-            Data array of shape (n. observations, n.features). Each row should contain the average data for a participant, possibly the average for some within-participants condition for a participant.
-        design : pandas.DataFrame, optional
-            DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
-        between : str or iterable, optional
-            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
-        within : TYPE, optional
-            Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
-        participant : TYPE, optional
-            Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
-            
-        Examples
-        --------
-        >>> mod = pyplsc.BDA()
-        >>> data = numpy.random.normal(size=(4, 3))
-        >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
-        >>> # Pattern 1: provide design matrix, specify column names of condition indicators
-        >>> mod.fit(data, design, between='group')
-        >>> # Pattern 2: provide condition indicators directly as iterables
-        >>> mod.fit(data, between)
-
-        """
-        if between is None and within is None:
-            raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
-        if self.pre_subtract is not None:
-            if self.pre_subtract == 'between':
-                if between is None:
-                    raise ValueError('Pre-subtracting between-participant condition means is not possible when no between-participant condition is defined')
-                if within is None:
-                    raise Warning('No effect of between-participant condition will be detectable if between-participant condition means are pre-subtracted and no within-participant condition is defined.')
-            if self.pre_subtract == 'within':
-                if within is None:
-                    raise ValueError('Pre-subtracting within-participant condition means is not possible when no within-participant condition is definted')
-                if between is None:
-                    raise Warning('No effect of within-participant condition will be detectable if within-participant condition means are pre-subtracted and no between-participant condition is defined.')
-        self._setup_data(data)
-        self._setup_design_matrix(design, between, within, participant)
-        if len(np.unique(self.stratifier_)) == 1:
-            raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
-        # TODO: enforce one between condition per participant
-        mean_centred = utils.get_mean_centred(
-            data=self.data_,
-            design=self.design_,
-            stratifier=self.stratifier_,
-            pre_subtract=self.pre_subtract)
-        self._initial_decomposition(mean_centred)
-        # Compute design scores
-        self.design_scores_ = self.design_sals_[self.stratifier_]
-        if self.boot_stat == 'condwise-scores-centred':
-            val = mean_centred @ self.data_sals_
-        elif self.boot_stat == 'condwise-scores':
-            data_scores = self.transform()
-            val = utils.get_groupwise_means(data_scores, self.stratifier_)
-        self.boot_stat_val_ = val
-        return self
-    def _single_permutation(self, perm_idx):
-        # Compute SVD for this permutation
-        mean_centred = utils.get_mean_centred(
-            data=self.data_,
-            design=self.design_.iloc[perm_idx],
-            stratifier=self.stratifier_[perm_idx],
-            pre_subtract=self.pre_subtract)
-        s = self._svd(mean_centred, compute_uv=False)
-        return s
-    def _single_bootstrap_resample(self, resample_idx, alignment_method):
-        # Run decomposition
-        resampled_data = self.data_[resample_idx]
-        resampled_design = self.design_.iloc[resample_idx]
-        resampled_strat = self.stratifier_[resample_idx]
-        mean_centred = utils.get_mean_centred(
-            data=resampled_data,
-            design=resampled_design,
-            stratifier=resampled_strat,
-            pre_subtract=self.pre_subtract)
-        u, s, v = self._svd(mean_centred)
-        resampled_data_sals = self._align(u, s, v, method=alignment_method)
-        # Brain scores
-        if self.boot_stat == 'condwise-scores-centred':
-            boot_stat = mean_centred @ self.data_sals_
-        elif self.boot_stat == 'condwise-scores':
-            scores = resampled_data @ self.data_sals_
-            boot_stat = utils.get_groupwise_means(scores, resampled_strat)
-        return boot_stat, resampled_data_sals
   
 class PLSC(BaseClass):
     """
@@ -814,6 +645,7 @@ class PLSC(BaseClass):
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
+        self.design_sal_labels_ = self._get_design_sal_labels()
         R = utils.get_stacked_cormats(
             self.data_,
             self.covariates_,
@@ -853,6 +685,205 @@ class PLSC(BaseClass):
             boot_stat = utils.get_stacked_cormats(resampled_data @ self.data_sals_, # Brain scores
                                                   resampled_cov,
                                                   resampled_strat)
+        elif self.boot_stat == 'condwise-scores':
+            scores = resampled_data @ self.data_sals_
+            boot_stat = utils.get_groupwise_means(scores, resampled_strat)
+        return boot_stat, resampled_data_sals
+
+class BDA(BaseClass):
+    """
+    Barycentric discriminant analysis model, also known as mean-centred PLS. Used for analyzing condition-wise differences.
+    
+    Parameters
+    ----------
+    boot_stat : str, optional
+        Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
+
+        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
+        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
+    pre_subtract : str, optional
+        When there are both between- and within-participant factors
+            
+        - ``'none'`` (default): 
+        - ``'between'``: 
+        - ``'within'``: 
+    svd_method : str, optional
+        Method to use for singular value decomposition. Must be one of:
+            
+        - ``'lapack'`` (default): use ``numpy.linalg.svd``.
+        - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
+    random_state : int, optional
+        Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
+    
+    Attributes
+    ----------
+    boot_stat : str
+        Name of statistic whose distribution is derived during bootstrap resampling.
+    boot_stat_val_ : numpy.ndarray
+        Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
+    boot_stat_ci_ : numpy.ndarray
+        Confidence interval on :attr:`boot_stat_val_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
+    bootstrap_ratios_ : numpy.ndarray
+        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+    confint_level_ : float
+        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
+    data_ : numpy.ndarray
+        Data used to fit model.
+    data_sals_ : numpy.ndarray
+        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
+    design_ : pandas.DataFrame
+        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+    design_sals_ : numpy.ndarray
+        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
+    design_scores_ : numpy.ndarray
+        Design scores for the data used to fit the model. Set by :meth:`fit`.
+    n_boot_ : int
+        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
+    n_lv_ : int
+        Number of latent variables in the model. Set by :meth:`fit`.
+    pre_subtract : str
+        Pre-centering method used when computing mean-centred data.
+    pvals_ : numpy.ndarray
+        Permutation p values for the latent variables. Set by :meth:`permute`.
+    random_state : int
+        Random state for reproducible permutation and bootstrap resampling.
+    singular_vals_ : numpy.ndarray
+        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
+    stratifier_ : numpy.ndarray
+        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
+    svd_method : str
+        Method to use for SVD.
+    variance_explained_
+        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
+    """
+    def __init__(self, boot_stat='condwise-scores-centred', effects=None, svd_method='lapack', random_state=None):
+        super().__init__(svd_method=svd_method,
+                         boot_stat=boot_stat,
+                         random_state=random_state,
+                         validate_resamples=False)
+        if effects == None:
+            self.effects = {'between', 'within', 'interaction'}
+        elif isinstance(effects, str):
+            # Single effect
+            self.effects = {effects}
+        else:
+            self.effects = set(effects) # TODO: document and validate
+        # For later computation, figure out effects to remove
+        all_effects = {'between', 'within', 'interaction'}
+        self._rm_effects = all_effects - self.effects
+    def _get_mean_centred(self, data=None, design=None, stratifier=None, rm_effects=None):
+        if data is None:
+            data = self.data_
+        if design is None:
+            design = self.design_
+        if stratifier is None:
+            stratifier = self.stratifier_
+        if rm_effects is None:
+            rm_effects = self._rm_effects
+        labels = self.design_sal_labels_
+        # Begin with matrix including all effects, then remove as specified
+        groupwise_means = utils.get_groupwise_means(data, stratifier)
+        if len(rm_effects) > 0:
+            # Compute effects to remove
+            effect_mats = {}
+            if len({'between', 'interaction'} & rm_effects) > 0:
+                levelwise_means = utils.get_groupwise_means(groupwise_means, labels['between'].cat.codes)
+                effect_mats['between'] = levelwise_means[labels['between'].cat.codes]
+            if len({'within', 'interaction'} & rm_effects) > 0:
+                levelwise_means = utils.get_groupwise_means(data, design['within'].cat.codes)
+                effect_mats['within'] = levelwise_means[labels['within'].cat.codes]
+            if 'interaction' in rm_effects:
+                effect_mats['interaction'] = groupwise_means - effect_mats['between'] - effect_mats['within']
+            # Remove specified effects
+            for rm_effect in rm_effects:
+                groupwise_means -= effect_mats[rm_effect]
+        groupwise_means -= groupwise_means.mean(axis=0)
+        return groupwise_means
+    def fit(self, data, design=None, between=None, within=None, participant=None):
+        """
+        Fit a barycentric discriminant analysis model.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data array of shape (n. observations, n.features). Each row should contain the average data for a participant, possibly the average for some within-participants condition for a participant.
+        design : pandas.DataFrame, optional
+            DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
+        between : str or iterable, optional
+            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
+        within : TYPE, optional
+            Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
+        participant : TYPE, optional
+            Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
+            
+        Examples
+        --------
+        >>> mod = pyplsc.BDA()
+        >>> data = numpy.random.normal(size=(4, 3))
+        >>> design = pandas.DataFrame({'group': [0, 0, 1, 1]})
+        >>> # Pattern 1: provide design matrix, specify column names of condition indicators
+        >>> mod.fit(data, design, between='group')
+        >>> # Pattern 2: provide condition indicators directly as iterables
+        >>> mod.fit(data, between)
+
+        """
+        if between is None and within is None:
+            raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
+        # TODO: rewrite the below errors
+        """
+        if self.pre_subtract != 'none':
+            if self.pre_subtract == 'between':
+                if between is None:
+                    raise ValueError('Pre-subtracting between-participant condition means is not possible when no between-participant condition is defined')
+                if within is None:
+                    raise Warning('No effect of between-participant condition will be detectable if between-participant condition means are pre-subtracted and no within-participant condition is defined.')
+            if self.pre_subtract == 'within':
+                if within is None:
+                    raise ValueError('Pre-subtracting within-participant condition means is not possible when no within-participant condition is definted')
+                if between is None:
+                    raise Warning('No effect of within-participant condition will be detectable if within-participant condition means are pre-subtracted and no between-participant condition is defined.')
+        """
+        self._setup_data(data)
+        self._setup_design_matrix(design, between, within, participant)
+        self.design_sal_labels_ = self._get_design_sal_labels()
+        if len(np.unique(self.stratifier_)) == 1:
+            raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
+        # TODO: enforce one between condition per participant
+        mean_centred = self._get_mean_centred()
+        self._initial_decomposition(mean_centred)
+        # Compute design scores
+        self.design_scores_ = self.design_sals_[self.stratifier_]
+        if self.boot_stat == 'condwise-scores-centred':
+            val = mean_centred @ self.data_sals_
+        elif self.boot_stat == 'condwise-scores':
+            data_scores = self.transform()
+            val = utils.get_groupwise_means(data_scores, self.stratifier_)
+        self.boot_stat_val_ = val
+        return self
+    def _single_permutation(self, perm_idx):
+        # Compute SVD for this permutation
+        mean_centred = self._get_mean_centred(
+            data=self.data_,
+            design=self.design_.iloc[perm_idx],
+            stratifier=self.stratifier_[perm_idx],
+            rm_effects=self._rm_effects)
+        s = self._svd(mean_centred, compute_uv=False)
+        return s
+    def _single_bootstrap_resample(self, resample_idx, alignment_method):
+        # Run decomposition
+        resampled_data = self.data_[resample_idx]
+        resampled_design = self.design_.iloc[resample_idx]
+        resampled_strat = self.stratifier_[resample_idx]
+        mean_centred = self._get_mean_centred(
+            data=resampled_data,
+            design=resampled_design,
+            stratifier=resampled_strat,
+            rm_effects=self._rm_effects)
+        u, s, v = self._svd(mean_centred)
+        resampled_data_sals = self._align(u, s, v, method=alignment_method)
+        # Brain scores
+        if self.boot_stat == 'condwise-scores-centred':
+            boot_stat = mean_centred @ self.data_sals_
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
             boot_stat = utils.get_groupwise_means(scores, resampled_strat)
