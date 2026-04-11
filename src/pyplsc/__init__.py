@@ -314,7 +314,7 @@ class BaseClass():
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         if isinstance(self, BDA):
             # Nullify p vals based on the rank of the matrix being decomposed
-            rank = len(self.effects) - 1
+            rank = len(self.effects)
             pvals[rank:] = np.nan
         self.pvals_ = pvals
         self._perm_done = True
@@ -375,7 +375,7 @@ class BaseClass():
             - ``'flip-design-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original design saliences are positive, then apply these sign flips to the recomputed data saliences.
             - ``'flip-data-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original data saliences are positive, then apply these sign flips to the recomputed data saliences.
         return_boot_stat_dist : bool, optional
-            # If true, bootstrap distribution from resampling is returned. This is thre distribution used to compute confidence intervals.
+            If true, distribution of ``boot_stat`` from resampling is returned. This is the distribution used to compute quantile-based confidence intervals.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -457,7 +457,7 @@ class BaseClass():
         Examples
         --------
         >>> # Make bar plot of boot_stat
-        >>> x = mod.get_labels('between')
+        >>> x = mod.design_sal_labels_['between']
         >>> lv_idx = 0 # First latent variable
         >>> height = mod.boot_stat_val_[:, lv_idx]
         >>> yerr = mod.get_boot_stat_yerr(lv_idx)
@@ -551,6 +551,8 @@ class PLSC(BaseClass):
         Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
     design_ : pandas.DataFrame
         Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+    design_sal_labels_ : pandas.DataFrame
+        Dataframe with rows corresponding to rows of the design saliences and columns specifying between-participants conditions, within-participants conditions, and covarites.
     design_sals_ : numpy.ndarray
         Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
     design_scores_ : numpy.ndarray
@@ -626,9 +628,9 @@ class PLSC(BaseClass):
             DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
         between : str or iterable, optional
             Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
-        within : TYPE, optional
+        within : str or iterable, optional
             Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
-        participant : TYPE, optional
+        participant : str or iterable, optional
             Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
 
         Examples
@@ -701,12 +703,6 @@ class BDA(BaseClass):
 
         - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
-    effects : str, optional
-        When there are both between- and within-participant factors
-            
-        - ``'none'`` (default): 
-        - ``'between'``: 
-        - ``'within'``: 
     svd_method : str, optional
         Method to use for singular value decomposition. Must be one of:
             
@@ -733,6 +729,8 @@ class BDA(BaseClass):
         Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
     design_ : pandas.DataFrame
         Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+    design_sal_labels_ : pandas.DataFrame
+        Dataframe with rows corresponding to rows of the design saliences and columns specifying between-participants conditions and within-participants conditions.
     design_sals_ : numpy.ndarray
         Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
     design_scores_ : numpy.ndarray
@@ -800,13 +798,19 @@ class BDA(BaseClass):
         design : pandas.DataFrame, optional
             DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
         between : str or iterable, optional
-            Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
+            Between-participants factor. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
         within : str or iterable, optional
-            Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
+            Within-participants factor. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
         participant : str or iterable, optional
             Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
         effects : str or iterable, optional
-            Effects to be included in the model. 
+            Effects to be included in the model. If only a between-participants factor is specified, then only a main effect of between-participants condition can be measured (same goes for within-participants, mutatis mutandis). However, if both a between- and a within-participants factor are specified, then any of the following effects can be specified:
+            
+            - ``'between'``: main effect of between-participants condition
+            - ``'within'``: main effect of within-participants condition
+            - ``'interaction'``: interaction of between- and within-participants factors
+            
+            In the original Matlab PLS, the default behaviour is to remove the between-participants factor, which is equivalent to ``effects=('within', 'interaction')``.
             
         Examples
         --------
@@ -816,7 +820,10 @@ class BDA(BaseClass):
         >>> # Pattern 1: provide design matrix, specify column names of condition indicators
         >>> mod.fit(data, design, between='group')
         >>> # Pattern 2: provide condition indicators directly as iterables
-        >>> mod.fit(data, between)
+        >>> mod.fit(data, between=design['group'])
+        >>> # Specifying effects
+        >>> mod.fit(data, between=between, within=within, participant=participant,
+        ...         effects=('within', 'interaction'))
 
         """
         if between is None and within is None:
@@ -837,6 +844,8 @@ class BDA(BaseClass):
             self.effects = {effects}
         else:
             self.effects = set(effects)
+            if len(self.effects) == 0:
+                raise ValueError('At least one effect must be specified.')
         invalid_effects = self.effects - self.__possible_effects
         if len(invalid_effects) > 0:
             raise ValueError('Effect(s) %s cannot be measured given the conditions defined in the design matrix' % invalid_effects)
