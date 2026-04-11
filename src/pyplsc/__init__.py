@@ -313,8 +313,9 @@ class BaseClass():
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         if isinstance(self, BDA):
-            # Mean-centering reduces the rank by 1; there are really only (n. groups - 1) degrees of freedom.
-            pvals[self.stratifier_.max():] = np.nan
+            # Nullify p vals based on the rank of the matrix being decomposed
+            rank = len(self.effects) - 1
+            pvals[rank:] = np.nan
         self.pvals_ = pvals
         self._perm_done = True
         if return_null_dist:
@@ -500,7 +501,7 @@ class BaseClass():
         lv_idxs = lv_idx
         lv_subdfs = []
         for lv_idx in lv_idxs:
-            sub_df = self.get_labels()
+            sub_df = self.design_sal_labels_.copy()
             sub_df['lv_idx'] = lv_idx
             sub_df['stat'] = self.boot_stat_val_[:, lv_idx]
             if self._boot_done:
@@ -600,8 +601,7 @@ class PLSC(BaseClass):
         # Initialize
         design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
         # Align the observations with the design saliences, level-wises
-        sal_labels = self.get_labels()
-        sal_levels = utils.get_stratifier(sal_labels, output='tuples')
+        sal_levels = utils.get_stratifier(self.design_sal_labels_, output='tuples')
         obs_levels = utils.get_stratifier(self.design_, output='tuples')
         for curr_lvl in set(obs_levels):
             obs_mask = [i for i, obs_lvl in enumerate(obs_levels) if obs_lvl == curr_lvl]
@@ -609,7 +609,7 @@ class PLSC(BaseClass):
             obs_submat = self.covariates_[obs_mask]
             sal_submat = self.design_sals_[sal_mask]
             # Ensure each covariate is being multiplied by the appropriate salience
-            assert all(sal_labels['covariate'].iloc[sal_mask] == self.covariate_names_)
+            assert all(self.design_sal_labels_['covariate'].iloc[sal_mask] == self.covariate_names_)
             design_scores[obs_mask] = obs_submat @ sal_submat
         return design_scores
     def fit(self, data, covariates, design=None, between=None, within=None, participant=None):
@@ -701,7 +701,7 @@ class BDA(BaseClass):
 
         - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
-    pre_subtract : str, optional
+    effects : str, optional
         When there are both between- and within-participant factors
             
         - ``'none'`` (default): 
@@ -756,30 +756,19 @@ class BDA(BaseClass):
     variance_explained_
         Proportion of variance explained by each latent variable. Set by :meth:`fit`.
     """
-    def __init__(self, boot_stat='condwise-scores-centred', effects=None, svd_method='lapack', random_state=None):
+    def __init__(self, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
         super().__init__(svd_method=svd_method,
                          boot_stat=boot_stat,
                          random_state=random_state,
                          validate_resamples=False)
-        if effects == None:
-            self.effects = {'between', 'within', 'interaction'}
-        elif isinstance(effects, str):
-            # Single effect
-            self.effects = {effects}
-        else:
-            self.effects = set(effects) # TODO: document and validate
-        # For later computation, figure out effects to remove
-        all_effects = {'between', 'within', 'interaction'}
-        self._rm_effects = all_effects - self.effects
-    def _get_mean_centred(self, data=None, design=None, stratifier=None, rm_effects=None):
+    def _get_mean_centred(self, data=None, design=None, stratifier=None):
         if data is None:
             data = self.data_
         if design is None:
             design = self.design_
         if stratifier is None:
             stratifier = self.stratifier_
-        if rm_effects is None:
-            rm_effects = self._rm_effects
+        rm_effects = self.__possible_effects - self.effects
         labels = self.design_sal_labels_
         # Begin with matrix including all effects, then remove as specified
         groupwise_means = utils.get_groupwise_means(data, stratifier)
@@ -797,9 +786,10 @@ class BDA(BaseClass):
             # Remove specified effects
             for rm_effect in rm_effects:
                 groupwise_means -= effect_mats[rm_effect]
+        # Mean centre
         groupwise_means -= groupwise_means.mean(axis=0)
         return groupwise_means
-    def fit(self, data, design=None, between=None, within=None, participant=None):
+    def fit(self, data, design=None, between=None, within=None, participant=None, effects='all'):
         """
         Fit a barycentric discriminant analysis model.
 
@@ -811,10 +801,12 @@ class BDA(BaseClass):
             DataFrame with columns to indicate between-participant group membership, within-participant condition, and/or participant identity, as applicable. The default is None.
         between : str or iterable, optional
             Between-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of group membership (e.g., a list of strings or integers). The default is None, indicating an absence of between-participant conditions.
-        within : TYPE, optional
+        within : str or iterable, optional
             Within-participants condition. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of condition (e.g., a list of strings or integers). The default is None, indicating an absence of within-participant conditions.
-        participant : TYPE, optional
+        participant : str or iterable, optional
             Participant identifier. This can be specified as a string referring to the appropriate column in ``design`` or as an iterable containing an indicator of participant identity (e.g., a list of strings or integers). The default is None, which is only permitted when there are no within-participant conditions.
+        effects : str or iterable, optional
+            Effects to be included in the model. 
             
         Examples
         --------
@@ -829,20 +821,25 @@ class BDA(BaseClass):
         """
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
-        # TODO: rewrite the below errors
-        """
-        if self.pre_subtract != 'none':
-            if self.pre_subtract == 'between':
-                if between is None:
-                    raise ValueError('Pre-subtracting between-participant condition means is not possible when no between-participant condition is defined')
-                if within is None:
-                    raise Warning('No effect of between-participant condition will be detectable if between-participant condition means are pre-subtracted and no within-participant condition is defined.')
-            if self.pre_subtract == 'within':
-                if within is None:
-                    raise ValueError('Pre-subtracting within-participant condition means is not possible when no within-participant condition is definted')
-                if between is None:
-                    raise Warning('No effect of within-participant condition will be detectable if within-participant condition means are pre-subtracted and no between-participant condition is defined.')
-        """
+        possible_effects = set()
+        if between is not None:
+            possible_effects |= {'between'}
+        if within is not None:
+            possible_effects |= {'within'}
+        if possible_effects == {'between', 'within'}:
+            possible_effects |= {'interaction'}
+        self.__possible_effects = possible_effects
+        if effects == 'all':
+            # Test all possible effects
+            self.effects = self.__possible_effects
+        elif isinstance(effects, str):
+            # Single effect
+            self.effects = {effects}
+        else:
+            self.effects = set(effects)
+        invalid_effects = self.effects - self.__possible_effects
+        if len(invalid_effects) > 0:
+            raise ValueError('Effect(s) %s cannot be measured given the conditions defined in the design matrix' % invalid_effects)
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self.design_sal_labels_ = self._get_design_sal_labels()
@@ -863,10 +860,8 @@ class BDA(BaseClass):
     def _single_permutation(self, perm_idx):
         # Compute SVD for this permutation
         mean_centred = self._get_mean_centred(
-            data=self.data_,
             design=self.design_.iloc[perm_idx],
-            stratifier=self.stratifier_[perm_idx],
-            rm_effects=self._rm_effects)
+            stratifier=self.stratifier_[perm_idx])
         s = self._svd(mean_centred, compute_uv=False)
         return s
     def _single_bootstrap_resample(self, resample_idx, alignment_method):
@@ -877,8 +872,7 @@ class BDA(BaseClass):
         mean_centred = self._get_mean_centred(
             data=resampled_data,
             design=resampled_design,
-            stratifier=resampled_strat,
-            rm_effects=self._rm_effects)
+            stratifier=resampled_strat)
         u, s, v = self._svd(mean_centred)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
         # Brain scores

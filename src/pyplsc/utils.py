@@ -33,8 +33,8 @@ def get_stratifier(design, output='ints'):
     return stratifier
 
 def get_groupwise_means(data, group_idx):
-    # Initialize
     n_groups = group_idx.max() + 1
+    # Initialize
     groupwise_means = np.zeros((n_groups, data.shape[1]), dtype=data.dtype)
     for i in range(n_groups):
         groupwise_means[i] = data[group_idx == i].mean(axis=0)

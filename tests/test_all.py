@@ -32,7 +32,7 @@ def fit_plsc(sample_data):
 
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
-    assert len(fit_bda.get_labels()) == len(fit_bda.design_sals_)
+    assert len(fit_bda.design_sal_labels_) == len(fit_bda.design_sals_)
     fit_bda.get_scores_frame()
     fit_bda.get_scores_frame(lv_idx=[0, 1])
     fit_bda.permute(n_perm=20)
@@ -53,22 +53,6 @@ def test_bda_basic(fit_bda):
     fit_bda.get_boot_stat_frame(lv_idx=0)
     fit_bda.get_boot_stat_frame(lv_idx=[0, 1])
 
-def test_bda_labels(fit_bda):
-    fit_bda.get_labels('between')
-    fit_bda.get_labels(output='frame')
-    fit_bda.get_labels(output='tuple-list')
-    fit_bda.get_labels(output='str')
-    fit_bda.get_labels(output='str', join='-')
-    
-def test_warnings(sample_data):
-    data, _, between, within, participant = sample_data
-    bda = pyplsc.BDA(pre_subtract='between')
-    with pytest.raises(Warning):
-        bda.fit(data, between=between)
-    bda = pyplsc.BDA(pre_subtract='within')
-    with pytest.raises(Warning):
-        bda.fit(data, within=within, participant=participant)
-
 def test_errors(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA()
@@ -88,13 +72,11 @@ def test_errors(sample_data):
         # yerr without having resampled
         bda.get_design_yerr(0)
     with pytest.raises(Exception):
-        # yerr without having resampled
-        bda.pre_subtract = 'within'
-        bda.fit(data, between=between)
+        # testing nonexistent effect
+        bda.fit(data, between=between, effects={'within'})
     with pytest.raises(Exception):
-        # yerr without having resampled
-        bda.pre_subtract = 'between'
-        bda.fit(data, within=within, participant=participant)
+        # testing nonexistent effect
+        bda.fit(data, within=within, participant=participant, effects={'between'})
 
 def test_flips(fit_bda):
     fit_bda.bootstrap(n_boot=2)
@@ -115,12 +97,11 @@ def test_bda_rng(fit_bda):
     pvals_2 = bda.pvals_
     assert all(np.isclose(pvals_1, pvals_2))
 
-def test_bda_pre_subtract(sample_data):
+def test_bda_effects(sample_data):
     data, covariates, between, within, participant = sample_data
-    bda = pyplsc.BDA(pre_subtract='between')
-    bda.fit(data=data, between=between, within=within, participant=participant)
-    bda = pyplsc.BDA(pre_subtract='within')
-    bda.fit(data=data, between=between, within=within, participant=participant)
+    bda = pyplsc.BDA()
+    bda.fit(data=data, between=between, within=within, participant=participant,
+            effects={'interaction'})
 
 def test_bda_input(sample_data):
     data, _, between, within, participant = sample_data
@@ -135,7 +116,7 @@ def test_bda_input(sample_data):
             between='b', within='w', participant=participant)
 
 def test_plsc_basic(fit_plsc):
-    assert len(fit_plsc.get_labels()) == len(fit_plsc.design_sals_)
+    assert len(fit_plsc.design_sal_labels_) == len(fit_plsc.design_sals_)
     fit_plsc.get_scores_frame()
     fit_plsc.get_scores_frame(lv_idx=[0, 1])
     fit_plsc.permute(n_perm=2)
@@ -145,13 +126,6 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.get_boot_stat_frame()
     fit_plsc.get_boot_stat_frame(lv_idx=0)
     fit_plsc.get_boot_stat_frame(lv_idx=[0, 1])
-
-def test_plsc_labels(fit_plsc):
-    fit_plsc.get_labels(which='covariate')
-    fit_plsc.get_labels(output='frame')
-    fit_plsc.get_labels(output='tuple-list')
-    fit_plsc.get_labels(output='str')
-    fit_plsc.get_labels(output='str', join='-')
 
 def test_svd_methods(sample_data):
     data, _, between, within, participant = sample_data
