@@ -17,9 +17,19 @@ class NotFittedError(Exception):
         self.message = '.fit() has not yet been called to fit model'
         super().__init__(self.message)
 
+class BadStrArgError(Exception):
+    def __init__(self, argname, provided, allowed):
+        self.message = '%s is not a valid value for %s. Must be one of %s' % (provided, argname, allowed)
+        super().__init__(self.message)
+
+def _check_str_arg(argname, provided, allowed):
+    if provided not in allowed:
+        raise BadStrArgError(argname, provided, allowed)
+
 class BaseClass():
     # Parent class for BDA and PLSC.
     def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
+        _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self._fitted = False
         self._perm_done = False
@@ -76,6 +86,13 @@ class BaseClass():
                 else:
                     design[colname] = pd.Categorical(col)
             design = design[['between', 'within', 'participant']]
+        # Validation
+        between_per_participant = design.groupby('participant')['between'].nunique()
+        if not all(between_per_participant == 1):
+            raise Warning('Some participants belong to more than one between-participants condition')
+        within_per_participant = design.groupby('participant')['within'].nunique()
+        if len(within_per_participant.unique()) > 1:
+            raise Warning('Participants do not all have the same number of within-participants conditions')
         self.design_ = design
         self.stratifier_ = utils.get_stratifier(design) # This is handy to pre-compute because it's used many times later on
     def _svd(self, M, compute_uv=True):
@@ -124,13 +141,12 @@ class BaseClass():
         """
         condition_labels = self.design_[['between', 'within']].drop_duplicates()
         if isinstance(self, PLSC):
-            # Create a MultiIndex from product of conditions and covariates
+            # Covariates included; create product of conditions and covariates
             index = pd.MultiIndex.from_product(
                 [condition_labels.index, self.covariate_names_],
                 names=['condition_combo', 'covariate']
             )
-            
-            # Build the expanded dataframe
+            # Build the full dataframe
             labels = (
                 condition_labels
                 .loc[index.get_level_values('condition_combo')]  # repeat each combo row
@@ -139,11 +155,6 @@ class BaseClass():
             )
         else:
             labels = condition_labels
-        # Extract subset of labels
-        which = ['between', 'within']
-        if isinstance(self, PLSC):
-            which.append('covariate')
-        labels = labels[which]
         labels = labels.reset_index(drop=True)
         return labels
     def flip_signs(self, lv_idx=None):
@@ -374,6 +385,7 @@ class BaseClass():
             - ``'rotate-data-sals'``: Find the rotation that solves the orthogonal procrustes problem to align the recomputed and original data saliences, then apply this to the recomputed data saliences.
             - ``'flip-design-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original design saliences are positive, then apply these sign flips to the recomputed data saliences.
             - ``'flip-data-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original data saliences are positive, then apply these sign flips to the recomputed data saliences.
+            - ``'none'``: Perform no alignment.
         return_boot_stat_dist : bool, optional
             If true, distribution of ``boot_stat`` from resampling is returned. This is the distribution used to compute quantile-based confidence intervals.
         n_jobs : int, optional
@@ -394,6 +406,9 @@ class BaseClass():
             raise NotFittedError()
         if n_boot < 1:
             raise ValueError('n_boot must be a positive integer')
+        _check_str_arg('alignment_method',
+                        alignment_method,
+                        ('rotate-design-sals', 'rotate-data-sals', 'flip-design-sals', 'flip-data-sals', 'none'))
         n_jobs = effective_n_jobs(n_jobs)
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
@@ -438,6 +453,8 @@ class BaseClass():
             A = np.sign(np.diag(v.T @ self.data_sals_))
         elif method == 'flip-design-sals':
             A = np.sign(np.diag(u.T @ self.design_sals_))
+        elif method == 'none':
+            A = np.diag([1]*self.n_lv_)
         aligned = v*s @ A
         return aligned
     def get_boot_stat_yerr(self, lv_idx):
@@ -577,6 +594,9 @@ class PLSC(BaseClass):
         Proportion of variance explained by each latent variable. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
+        _check_str_arg('boot_stat',
+                        boot_stat,
+                        ('score-covariate-corr', 'condwise-scores'))
         super().__init__(boot_stat=boot_stat,
                          svd_method=svd_method,
                          random_state=random_state,
@@ -755,10 +775,37 @@ class BDA(BaseClass):
         Proportion of variance explained by each latent variable. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
+        _check_str_arg('boot_stat',
+                       boot_stat,
+                       ('condwise-scores-centred', 'condwise-scores'))
         super().__init__(svd_method=svd_method,
                          boot_stat=boot_stat,
                          random_state=random_state,
                          validate_resamples=False)
+    def _setup_effects(self, effects, between, within):
+        if between is None and within is None:
+            raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
+        possible_effects = set()
+        if between is not None:
+            possible_effects |= {'between'}
+        if within is not None:
+            possible_effects |= {'within'}
+        if possible_effects == {'between', 'within'}:
+            possible_effects |= {'interaction'}
+        self.__possible_effects = possible_effects
+        if effects == 'all':
+            # Test all possible effects
+            self.effects = self.__possible_effects
+        elif isinstance(effects, str):
+            # Single effect
+            self.effects = {effects}
+        else:
+            self.effects = set(effects)
+            if len(self.effects) == 0:
+                raise ValueError('At least one effect must be specified.')
+        invalid_effects = self.effects - self.__possible_effects
+        if len(invalid_effects) > 0:
+            raise ValueError('Effect(s) %s cannot be measured given the conditions defined in the design matrix' % invalid_effects)
     def _get_mean_centred(self, data=None, design=None, stratifier=None):
         if data is None:
             data = self.data_
@@ -826,35 +873,12 @@ class BDA(BaseClass):
         ...         effects=('within', 'interaction'))
 
         """
-        if between is None and within is None:
-            raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
-        possible_effects = set()
-        if between is not None:
-            possible_effects |= {'between'}
-        if within is not None:
-            possible_effects |= {'within'}
-        if possible_effects == {'between', 'within'}:
-            possible_effects |= {'interaction'}
-        self.__possible_effects = possible_effects
-        if effects == 'all':
-            # Test all possible effects
-            self.effects = self.__possible_effects
-        elif isinstance(effects, str):
-            # Single effect
-            self.effects = {effects}
-        else:
-            self.effects = set(effects)
-            if len(self.effects) == 0:
-                raise ValueError('At least one effect must be specified.')
-        invalid_effects = self.effects - self.__possible_effects
-        if len(invalid_effects) > 0:
-            raise ValueError('Effect(s) %s cannot be measured given the conditions defined in the design matrix' % invalid_effects)
+        self._setup_effects(effects, between, within)
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self.design_sal_labels_ = self._get_design_sal_labels()
         if len(np.unique(self.stratifier_)) == 1:
             raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
-        # TODO: enforce one between condition per participant
         mean_centred = self._get_mean_centred()
         self._initial_decomposition(mean_centred)
         # Compute design scores
