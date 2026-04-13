@@ -622,7 +622,7 @@ class PLSC(BaseClass):
     def _get_design_scores(self):
         # Initialize
         design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
-        # Align the observations with the design saliences, level-wises
+        # Align the observations with the design saliences, level-wise
         sal_levels = utils.get_stratifier(self.design_sal_labels_, output='tuples')
         obs_levels = utils.get_stratifier(self.design_, output='tuples')
         for curr_lvl in set(obs_levels):
