@@ -609,7 +609,10 @@ class PLSC(BaseClass):
             covariate_array = covariates
             covariate_names = ['cov%s' % i for i in range(covariates.shape[1])]
         else:
-            if not isinstance(covariates, pd.DataFrame):
+            if isinstance(covariates, pd.DataFrame):
+                covariate_array = covariates.to_numpy()
+                covariate_names = covariates.columns.to_list()
+            else:
                 try:
                     covariate_array = design[covariates].to_numpy()
                     covariate_names = covariates
