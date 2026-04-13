@@ -113,7 +113,7 @@ class BaseClass():
         # Initial fit and add various properties
         u, s, v = self._svd(to_factorize)
         self.singular_vals_ = s
-        self.n_lv_ = len(s)
+        self.n_sv_ = len(s)
         self.variance_explained_ = s / sum(s)
         self.design_sals_ = u
         self.data_sals_ = v
@@ -178,7 +178,7 @@ class BaseClass():
         if not self._fitted:
             raise NotFittedError()
         if lv_idx is None:
-            lv_idx = range(self.n_lv_)
+            lv_idx = range(self.n_sv_)
         self.design_sals_[:, lv_idx] *= -1
         self.data_sals_[:, lv_idx] *= -1
         self.boot_stat_val_[:, lv_idx] *= -1
@@ -234,7 +234,7 @@ class BaseClass():
         if not self._fitted:
             raise NotFittedError()
         if lv_idx is None:
-            lv_idx = list(range(self.n_lv_))
+            lv_idx = list(range(self.n_sv_))
         else:
             try:
                 len(lv_idx)
@@ -454,7 +454,7 @@ class BaseClass():
         elif method == 'flip-design-sals':
             A = np.sign(np.diag(u.T @ self.design_sals_))
         elif method == 'none':
-            A = np.diag([1]*self.n_lv_)
+            A = np.diag([1]*self.n_sv_)
         aligned = v*s @ A
         return aligned
     def get_boot_stat_yerr(self, lv_idx):
@@ -509,7 +509,7 @@ class BaseClass():
         if not self._fitted:
             raise NotFittedError()
         if lv_idx is None:
-            lv_idx = list(range(self.n_lv_))
+            lv_idx = list(range(self.n_sv_))
         else:
             try:
                 len(lv_idx)
@@ -576,8 +576,8 @@ class PLSC(BaseClass):
         Design scores for the data used to fit the model. Set by :meth:`fit`.
     n_boot_ : int
         Number of bootstrap resamples used. Set by :meth:`bootstrap`.
-    n_lv_ : int
-        Number of latent variables in the model. Set by :meth:`fit`.
+    n_sv_ : int
+        Number of singular values, i.e., the number of latent variable pairs in the model. Set by :meth:`fit`.
     pre_subtract : str
         Pre-centering method used when computing mean-centred data.
     pvals_ : numpy.ndarray
@@ -621,7 +621,7 @@ class PLSC(BaseClass):
         self.covariate_names_ = covariate_names
     def _get_design_scores(self):
         # Initialize
-        design_scores = np.zeros((len(self.covariates_), self.n_lv_), dtype=self.design_sals_.dtype)
+        design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
         # Align the observations with the design saliences, level-wises
         sal_levels = utils.get_stratifier(self.design_sal_labels_, output='tuples')
         obs_levels = utils.get_stratifier(self.design_, output='tuples')
@@ -757,7 +757,7 @@ class BDA(BaseClass):
         Design scores for the data used to fit the model. Set by :meth:`fit`.
     n_boot_ : int
         Number of bootstrap resamples used. Set by :meth:`bootstrap`.
-    n_lv_ : int
+    n_sv_ : int
         Number of latent variables in the model. Set by :meth:`fit`.
     pre_subtract : str
         Pre-centering method used when computing mean-centred data.
