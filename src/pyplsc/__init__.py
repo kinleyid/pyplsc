@@ -104,6 +104,7 @@ class BaseClass():
                 s = lapack_svd(M, full_matrices=False, compute_uv=False)
         elif self.svd_method == 'randomized':
             u, s, v = randomized_svd(M, n_components=len(M))
+        s[self.rank_:] = 0
         if compute_uv:
             out = u, s, v.T
         else:
@@ -114,7 +115,7 @@ class BaseClass():
         u, s, v = self._svd(to_factorize)
         self.singular_vals_ = s
         self.n_sv_ = len(s)
-        self.variance_explained_ = s / sum(s)
+        self.variance_explained_ = s**2 / sum(s**2)
         self.design_sals_ = u
         self.data_sals_ = v
         self._fitted = True
@@ -288,7 +289,7 @@ class BaseClass():
                     perm[unshuffled_rows_by_ptpt[ptpt]] = rows # Assign participant's new rows to their old rows
             perms.append(perm)
         return perms
-    def permute(self, n_perm=5000, return_null_dist=False, n_jobs=1):
+    def permute(self, n_perm=5000, return_null_dist=True, n_jobs=1):
         """
         Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the :attr:`pvals_` property.
 
@@ -297,7 +298,7 @@ class BaseClass():
         n_perm : int, optional
             Number of permutations t operform. The default is 5000.
         return_null_dist : bool, optional
-            If true, permutation samples will be returned as a 2D (n. perms, n. latent vars) array.
+            If ``True``, permutation samples will be returned as a 2D (n. perms, n. latent vars) array. Default is ``True``.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -325,8 +326,7 @@ class BaseClass():
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
         if isinstance(self, BDA):
             # Nullify p vals based on the rank of the matrix being decomposed
-            rank = len(self.effects)
-            pvals[rank:] = np.nan
+            pvals[self.rank_:] = np.nan
         self.pvals_ = pvals
         self._perm_done = True
         if return_null_dist:
@@ -368,7 +368,7 @@ class BaseClass():
                     validated = True
             resamples.append(resample)
         return resamples
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=False, n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=True, n_jobs=1):
         """
         Perform (stratified) bootstrap resampling to assess the reliability of the data saliences.
 
@@ -387,7 +387,7 @@ class BaseClass():
             - ``'flip-data-sals'``: Find the set of sign flips that ensures the inner product of the recomputed and original data saliences are positive, then apply these sign flips to the recomputed data saliences.
             - ``'none'``: Perform no alignment.
         return_boot_stat_dist : bool, optional
-            If true, distribution of ``boot_stat`` from resampling is returned. This is the distribution used to compute quantile-based confidence intervals.
+            If ``True``, distribution of ``boot_stat`` from resampling is returned. This is the distribution used to compute quantile-based confidence intervals. Default is ``True``.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
 
@@ -593,7 +593,7 @@ class PLSC(BaseClass):
     svd_method : str
         Method to use for SVD.
     variance_explained_
-        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
+        Proportion of variance explained by each latent variable pair. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
@@ -677,6 +677,7 @@ class PLSC(BaseClass):
             self.data_,
             self.covariates_,
             self.stratifier_)
+        self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_scores_ = self._get_design_scores()
         # Compute boot stat
@@ -779,7 +780,7 @@ class BDA(BaseClass):
     svd_method : str
         Method to use for SVD.
     variance_explained_
-        Proportion of variance explained by each latent variable. Set by :meth:`fit`.
+        Proportion of variance explained by each latent variable pair. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
@@ -887,6 +888,7 @@ class BDA(BaseClass):
         if len(np.unique(self.stratifier_)) == 1:
             raise ValueError('The conjunction of between- and within-participant factors has only one unique level. I.e., the data cannot be stratified for BDA.')
         mean_centred = self._get_mean_centred()
+        self.rank_ = np.linalg.matrix_rank(mean_centred)
         self._initial_decomposition(mean_centred)
         # Compute design scores
         self.design_scores_ = self.design_sals_[self.stratifier_]
