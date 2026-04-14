@@ -19,7 +19,7 @@ class NotFittedError(Exception):
 
 class BadStrArgError(Exception):
     def __init__(self, argname, provided, allowed):
-        self.message = '%s is not a valid value for %s. Must be one of %s' % (provided, argname, allowed)
+        self.message = '%s is not a valid value for "%s". Must be one of %s' % (provided, argname, allowed)
         super().__init__(self.message)
 
 def _check_str_arg(argname, provided, allowed):
@@ -183,7 +183,7 @@ class BaseClass():
         self.data_sals_[:, lv_idx] *= -1
         self.boot_stat_val_[:, lv_idx] *= -1
         if self._boot_done:
-            self.bootstrap_ratios_[:, lv_idx] *= -1
+            self.data_sals_z_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
             self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...] # TODO: check that this logic is correct
     def transform(self, data=None, lv_idx=None):
@@ -399,7 +399,7 @@ class BaseClass():
         Examples
         --------
         >>> mod.bootstrap(1000, n_jobs=-1)
-        >>> print(mod.bootstrap_ratios_)
+        >>> print(mod.data_sals_z_)
         >>> print(mod.boot_stat_ci[..., 0]) # Print CI of boot_stat for first LV
         """
         if not self._fitted:
@@ -435,7 +435,7 @@ class BaseClass():
             M2 += (resampled_data_sals - old_mean) * (resampled_data_sals - mean)
         # Compute standard deviations for data saliences to get bootstrap ratios
         std_data_sals = np.sqrt(M2 / (n_boot - 1))
-        self.bootstrap_ratios_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
+        self.data_sals_z_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
         self.data_sals_std_ = std_data_sals
         # Compute confidence intervals for design saliences
         boot_stats = np.stack(boot_stat_dist)
@@ -556,8 +556,6 @@ class PLSC(BaseClass):
         Point estimate from initial decomposition of statistic whose distribution is derived during :meth:`bootstrap` resampling. Set by :meth:`fit`.
     boot_stat_ci_ : numpy.ndarray
         Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
-    bootstrap_ratios_ : numpy.ndarray
-        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     confint_level_ : float
         Level of confidence interval on stat named by :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
     covariates_ : pandas.DataFrame
@@ -566,6 +564,10 @@ class PLSC(BaseClass):
         Data used to fit model.
     data_sals_ : numpy.ndarray
         Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
+    data_sals_std_ : numpy.ndarray
+        Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+    data_sals_z_ : numpy.ndarray
+        Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     design_ : pandas.DataFrame
         Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
     design_sal_labels_ : pandas.DataFrame
@@ -742,14 +744,16 @@ class BDA(BaseClass):
         Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
     boot_stat_ci_ : numpy.ndarray
         Confidence interval on :attr:`boot_stat_val_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
-    bootstrap_ratios_ : numpy.ndarray
-        Data saliences normalized by their standard deviations as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     confint_level_ : float
         Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
     data_ : numpy.ndarray
         Data used to fit model.
     data_sals_ : numpy.ndarray
         Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
+    data_sals_std_ : numpy.ndarray
+        Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+    data_sals_z_ : numpy.ndarray
+        Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
     design_ : pandas.DataFrame
         Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
     design_sal_labels_ : pandas.DataFrame

@@ -1,4 +1,4 @@
-pyplsc==0.0.5
+pyplsc
 matplotlib
 nbsphinx
 ipykernel
