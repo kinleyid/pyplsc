@@ -32,13 +32,16 @@ class BaseClass():
         _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
         # Private properties for tracking whether permutation testing and bootstrap resampling have been done
         self._fitted = False
-        self._perm_done = False
-        self._boot_done = False
+        self._reset()
         self._validate_resamples = validate_resamples
         # Public properties
         self.svd_method = svd_method
         self.boot_stat = boot_stat
         self.random_state = random_state
+    def _reset(self):
+        # Reset variables that track whether perm_done and boot_done
+        self._perm_done = False
+        self._boot_done = False
     def _setup_data(self, data):
         # Add data_ as a property
         valid_data = True
@@ -252,7 +255,7 @@ class BaseClass():
         df = pd.concat(lv_subdfs)
         df = df.reset_index(drop=True)
         return df
-    def _get_permutations(self, n_perm):
+    def _get_permutations(self, n_perm, silent):
         # Get indices that can be used to permute
         rng = np.random.default_rng(self.random_state)
         if self.design_['within'].nunique() == 1:
@@ -266,7 +269,7 @@ class BaseClass():
                 case = 'only-within'
         n_obs = len(self.design_)
         perms = []
-        for perm_n in tqdm(range(n_perm), desc='Getting permutations'):
+        for perm_n in tqdm(range(n_perm), desc='Getting permutations', disable=silent):
             if case == 'only-between':
                 # Just shuffle all rows
                 perm = rng.permutation(n_obs)
@@ -289,7 +292,7 @@ class BaseClass():
                     perm[unshuffled_rows_by_ptpt[ptpt]] = rows # Assign participant's new rows to their old rows
             perms.append(perm)
         return perms
-    def permute(self, n_perm=5000, return_null_dist=True, n_jobs=1):
+    def permute(self, n_perm=5000, return_null_dist=True, n_jobs=1, print_prog=True):
         """
         Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the :attr:`pvals_` property.
 
@@ -301,6 +304,8 @@ class BaseClass():
             If ``True``, permutation samples will be returned as a 2D (n. perms, n. latent vars) array. Default is ``True``.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
+        print_prog : bool, optional
+            Specifies whether to display a progress bar. Default is ``True``.
 
         Returns
         -------
@@ -316,11 +321,12 @@ class BaseClass():
             raise NotFittedError()
         if n_perm < 1:
             raise ValueError('n_perm must be a positive integer')
+        silent = not print_prog
         # Pre-generate perm_idx
-        perms = self._get_permutations(n_perm)
+        perms = self._get_permutations(n_perm, silent)
         perm_singvals = Parallel(n_jobs=n_jobs)(
             delayed(self._single_permutation)(perm)
-            for perm in tqdm(perms, desc='Permuting')
+            for perm in tqdm(perms, desc='Permuting', disable=silent)
         )
         null_dist = np.stack(perm_singvals)
         pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
@@ -331,7 +337,7 @@ class BaseClass():
         self._perm_done = True
         if return_null_dist:
             return null_dist
-    def _get_resamples(self, n_boot, validate=False):
+    def _get_resamples(self, n_boot, validate=False, silent=False):
         rng = np.random.default_rng(self.random_state)
         rows_by_ptpt = self.design_.groupby('participant').indices
         # Is there a between-participants condition?
@@ -346,7 +352,7 @@ class BaseClass():
             strat_levels = np.unique(self.stratifier_)
             ptpts = self.design_['participant'].to_numpy()
         resamples = []
-        for boot_n in tqdm(range(n_boot), desc='Getting resamples'):
+        for boot_n in tqdm(range(n_boot), desc='Getting resamples', disable=silent):
             validated = False
             while not validated:
                 if case == 'between':
@@ -368,7 +374,7 @@ class BaseClass():
                     validated = True
             resamples.append(resample)
         return resamples
-    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=True, n_jobs=1):
+    def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=True, n_jobs=1, print_prog=True):
         """
         Perform (stratified) bootstrap resampling to assess the reliability of the data saliences.
 
@@ -390,6 +396,8 @@ class BaseClass():
             If ``True``, distribution of ``boot_stat`` from resampling is returned. This is the distribution used to compute quantile-based confidence intervals. Default is ``True``.
         n_jobs : int, optional
             Number of parallel jobs to deploy to compute permutations. -1 automatically deploys the maximum number of jobs. The default is 1.
+        print_prog : bool, optional
+            Specifies whether to display a progress bar. Default is ``True``.
 
         Returns
         -------
@@ -410,10 +418,11 @@ class BaseClass():
                         alignment_method,
                         ('rotate-design-sals', 'rotate-data-sals', 'flip-design-sals', 'flip-data-sals', 'none'))
         n_jobs = effective_n_jobs(n_jobs)
+        silent = not print_prog
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
-        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples)
+        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples, silent=silent)
         # Run bootstraps in parallel
         # Set up container for boot_stat
         boot_stat_dist = []
@@ -426,7 +435,7 @@ class BaseClass():
             for boot_idx in boot_idxs
         )
         count = 0
-        for boot_stat, resampled_data_sals in tqdm(results, total=n_boot, desc='Resampling'):
+        for boot_stat, resampled_data_sals in tqdm(results, total=n_boot, desc='Resampling', disable=silent):
             boot_stat_dist.append(boot_stat)
             # Welford's algorithm
             count += 1
@@ -669,6 +678,7 @@ class PLSC(BaseClass):
         >>> # Pattern 2: provide condition indicators directly as iterables
         >>> mod.fit(data, between)
         """
+        self._reset()
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
         self._setup_covariates(design, covariates)
@@ -881,6 +891,7 @@ class BDA(BaseClass):
         ...         effects=('within', 'interaction'))
 
         """
+        self._reset()
         self._setup_effects(effects, between, within)
         self._setup_data(data)
         self._setup_design_matrix(design, between, within, participant)
