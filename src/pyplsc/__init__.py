@@ -881,7 +881,7 @@ class BDA(BaseClass):
     
 class WPLSC(BaseClass):
     """
-    Within-participants PLSC (`Roberts et al., 2016 <https://doi.org/10.1016/j.neuroimage.2016.04.028>`_), Used for analyzing within-partcipants correlations. Cross-correlation matrices are computed within participants, averaged, and submitted to singular value decomposition.
+    Within-participants PLSC (`Roberts et al., 2016 <https://doi.org/10.1016/j.neuroimage.2016.04.028>`_). Used for analyzing within-partcipants correlations. Cross-correlation matrices are computed within participants, averaged, and submitted to singular value decomposition.
     
     Parameters
     ----------
