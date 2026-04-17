@@ -991,7 +991,7 @@ class WPLSC(BaseClass):
         if weighted:
             weights = []
             for model in self.models_:
-                weights.append(len(model.data_))
+                weights.append(len(model.data_) - 3) # Weight by expected variance of z
             weights = np.array(weights).astype(np.float64)
         else:
             weights = np.array([1]*len(self.models_)).astype(np.float64)

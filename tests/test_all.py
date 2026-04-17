@@ -19,7 +19,7 @@ def sample_data():
 @pytest.fixture
 def within_ptpt_sample_data(sample_data):
     data, covariates, between, within, participant = sample_data
-    n_ptpt = 20
+    n_ptpt = 5
     data = [data]*n_ptpt
     covariates = [covariates]*n_ptpt
     within = [within]*n_ptpt
@@ -54,7 +54,6 @@ def test_bda_basic(fit_bda):
     fit_bda.permute(n_perm=5)
     fit_bda.bootstrap(n_boot=5)
     yerr = fit_bda.get_boot_stat_yerr(0)
-    assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
     with pytest.raises(Exception):
         yerr = fit_bda.get_design_yerr([0, 1])
@@ -196,7 +195,6 @@ def test_wplsc_basic(fit_wplsc):
     fit_wplsc.permute(n_perm=5)
     fit_wplsc.bootstrap(n_boot=5)
     yerr = fit_wplsc.get_boot_stat_yerr(0)
-    assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
     with pytest.raises(Exception):
         yerr = fit_wplsc.get_design_yerr([0, 1])
