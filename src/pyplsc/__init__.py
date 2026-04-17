@@ -891,7 +891,7 @@ class WPLSC(BaseClass):
                          random_state=random_state,
                          validate_resamples=True)
         self.models_ = None #: ``list``: Participant-specific :class:`PLSC` models. Set by :meth:`fit`.
-        self.participant_labels_ = None #: ``list``: Participants labels. Set by :meth:`fit`.
+        self.participant_labels_ = None #: ``pandas.Categorical``: Participants labels. Set by :meth:`fit`.
         self.weights_ = None #: ``numpy.ndarray``: Weights, based on number of trials, applied to participant-level cross-correlation matrices when averaged together. Set by ``weighted`` argument to :meth:`fit`.
     def fit(self, data, covariates, design=None, within=None, participant=None, weighted=False):
         """
@@ -941,7 +941,7 @@ class WPLSC(BaseClass):
             raise ValueError('Must be as many participant-specific sets of condition indicators as there are participant-specific data arrays.')
         if len(participant) != len(data):
             raise ValueError('Must be as many participant identifiers as there are participant-specific data arrays.')
-        self.participant_labels_ = participant
+        self.participant_labels_ = pd.Categorical(participant)
         
         # Set up participant-specific PLSC models        
         self.models_ = []
@@ -982,7 +982,7 @@ class WPLSC(BaseClass):
         self._initial_decomposition(mean_R)
         # Decomposition is on the average rather than the participant-wise Rs
         # Thus copy decomposition results to individual models for computing scores
-        # Note that this isn't wasteful because it's one object in memory
+        # Note that this isn't wasteful because each array is one object in memory
         for model in self.models_:
             for attr in ['design_sals_',
                          'singular_vals_',
