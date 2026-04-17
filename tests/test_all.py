@@ -26,16 +26,20 @@ def fit_bda(sample_data):
 @pytest.fixture
 def fit_plsc(sample_data):
     data, covariates, between, within, participant = sample_data
-    plsc = pyplsc.PLSC()
+    plsc = pyplsc.PLSC(random_state=123)
     plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
     return plsc
 
 @pytest.fixture
 def fit_wplsc(sample_data):
     data, covariates, between, within, participant = sample_data
-    plsc = pyplsc.PLSC()
-    plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
-    return plsc
+    n_ptpt = 20
+    data = [data]*n_ptpt
+    covariates = [covariates]*n_ptpt
+    within = [within]*n_ptpt
+    wplsc = pyplsc.WPLSC(random_state=123)
+    wplsc.fit(data=data, covariates=covariates, within=within)
+    return wplsc
 
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting

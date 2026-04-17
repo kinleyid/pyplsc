@@ -207,6 +207,9 @@ class BaseClass():
             self.data_sals_z_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
             self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
+    def _get_data(self):
+        # This is designed to be overwritten by WPLSC
+        return self.data_
     def transform(self, data=None, lv_idx=None):
         """
         Compute data scores, i.e., coordinates of array data in the new basis defined by the latent variables, by multiplying a data array by the data saliences (the :attr:`data_sals_` property)
@@ -231,7 +234,7 @@ class BaseClass():
         if not self._fitted:
             raise NotFittedError()
         if data is None:
-            data = self.data_
+            data = self._get_data()
         sals = self.data_sals_
         if lv_idx is not None:
             sals = sals[:, lv_idx]
@@ -1020,7 +1023,30 @@ class WPLSC(BaseClass):
             model._fitted = True
             model.data_scores_ = model.transform()
             model.design_scores_ = model._get_design_scores()
-        # TODO: compute boot_stat
+        self.design_sal_labels_ = self.models_[0]._get_design_sal_labels()
+        self.design_scores_ = np.concat([model.design_scores_ for model in self.models_],
+                                        axis=0)
+        # Compute boot_stat within ptpts and then average
+        ptpt_boot_stats = []
+        for model in self.models_:
+            scores = model.transform()
+            if self.boot_stat == 'score-covariate-corr':
+                stat = utils.get_stacked_cormats(
+                    scores,
+                    model.covariates_,
+                    model.stratifier_)
+                stat = np.atanh(stat) # z-transform since this is a correlation
+            elif self.boot_stat == 'condwise-scores':
+                stat = utils.get_groupwise_means(
+                    scores,
+                    model.stratifier_)
+            ptpt_boot_stats.append(stat)
+        boot_stat = np.average(ptpt_boot_stats,
+                               axis=0,
+                               weights=self.weights_)
+        if self.boot_stat == 'score-covariate-corr':
+            boot_stat = np.tanh(boot_stat) # back-transform from fisher z
+        self.boot_stat_val_ = boot_stat
     def get_scores_frame(self, lv_idx=None):
         """
         Get dataframe containing design and data scores for each trial.
@@ -1049,6 +1075,10 @@ class WPLSC(BaseClass):
             df['participant'] = label
             ptpt_dfs.append(df)
         return pd.concat(ptpt_dfs)
+    def _get_data(self):
+        # Get big array of all participant-wise data
+        return np.concat([model._get_data() for model in self.models_],
+                         axis=0)
     def _get_permutations(self, n_perm, silent):
         ptptwise_perms = []
         for model in tqdm(self.models_, desc='Getting permutations', disable=silent):
@@ -1083,16 +1113,22 @@ class WPLSC(BaseClass):
         # as many times as the participant will be resampled. The reason we're
         # doing this in 2 steps is because _get_resamples resets the RNG so we can
         # only call it once per participant
-        _, ptpt_counts = np.unique(np.concat(resamplewise_ptpts), return_counts=True)
+        ptpt_ids, idwise_counts = np.unique(np.concat(resamplewise_ptpts), return_counts=True)
+        ptpt_counts = np.array([0]*len(np.unique(self.participant_labels_)))
+        for ptpt_id, idwise_count in zip(ptpt_ids, idwise_counts):
+            ptpt_counts[ptpt_id] = idwise_count # This may seem roundabout but its to ensure that ptpt_counts[ptpt_id] yields something for each possible ptpt_id
         ptptwise_trial_resamples = []
-        for ptpt_idx in tqdm(self.participant_labels_.codes, desc='Getting trial resamples', disable=silent):
+        for ptpt_idx in tqdm(range(len(ptpt_counts)), desc='Getting trial resamples', disable=silent):
             n_ptpt_boot = ptpt_counts[ptpt_idx]
-            model = self.models_[ptpt_idx]
-            ptpt_boots = model._get_resamples(n_boot=n_ptpt_boot,
-                                              min_unique=3, # 2 would yield a correlation of +/- 1, which gives infinite atanh
-                                              silent=True)
-            ptpt_boots = iter(ptpt_boots) # When we're looping over resamples, we'll call next() to get a unique trial resample
-            ptptwise_trial_resamples.append(ptpt_boots)
+            if n_ptpt_boot > 0:
+                model = self.models_[ptpt_idx]
+                ptpt_boots = model._get_resamples(n_boot=n_ptpt_boot,
+                                                  min_unique=3, # 2 would yield a correlation of +/- 1, which gives infinite atanh
+                                                  silent=True)
+                ptpt_boots = iter(ptpt_boots) # When we're looping over resamples, we'll call next() to get a unique trial resample
+                ptptwise_trial_resamples.append(ptpt_boots)
+            else:
+                ptptwise_trial_resamples.append(iter([])) # This only occurs if a participant NEVER appears in any resample, which should only happen when way too few resamples are being done (e.g. in dev work)
         # Next, combine them
         final_resample_idx = []
         for boot_n in range(n_boot): # No need for tqdm because this should be ultra quick---it's just re-organizing data
