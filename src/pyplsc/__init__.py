@@ -27,13 +27,13 @@ def _check_str_arg(argname, provided, allowed):
         raise BadStrArgError(argname, provided, allowed)
 
 class BaseClass():
-    # Parent class for PLSC, BDA, and WPPLSC.
-    def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
+    # Parent class for PLSC, BDA, and WPLSC.
+    def __init__(self, svd_method='lapack', boot_stat=None, min_unique=False, random_state=None):
         _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
         # Private attributes for tracking whether permutation testing and bootstrap resampling have been done
         self._fitted = False
         self._reset()
-        self._validate_resamples = validate_resamples
+        self._min_unique = min_unique
         # Document inheritable attributes in one place; requires initializing many to None but worth it imo
         # Attributes set by __init__()
         self.svd_method = svd_method #: ``str``: SVD method used
@@ -50,7 +50,7 @@ class BaseClass():
         # Attributes set by permute()
         self.pvals_ = None #: ``numpy.ndarray``: Permutation p values for the latent variable pairs. Set by :meth:`permute`.
         # Attributes set by bootstrap()
-        self.boot_stat_ci_ = None #: ``numpy.ndarray``: Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level_`.
+        self.boot_stat_ci_ = None #: ``numpy.ndarray``: Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. CI level is determined by :attr:`confint_level_`. Set by :meth:`bootstrap`.
         self.confint_level_ = None #: ``float``: Level of confidence interval on stat named by :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95). Set by :meth:`bootstrap`.
         self.data_sals_std_ = None #: ``numpy.ndarray``: Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
         self.data_sals_z_ = None #: ``numpy.ndarray``: Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
@@ -361,7 +361,7 @@ class BaseClass():
         self._perm_done = True
         if return_null_dist:
             return null_dist
-    def _get_resamples(self, n_boot, validate=False, silent=False):
+    def _get_resamples(self, n_boot, min_unique=1, silent=False):
         rng = np.random.default_rng(self.random_state)
         rows_by_ptpt = self.design_.groupby('participant').indices
         # Is there a between-participants condition?
@@ -372,7 +372,7 @@ class BaseClass():
         else:
             case = 'no-between'
             unique_ptpts = self.design_['participant'].unique()
-        if validate:
+        if min_unique > 1:
             strat_levels = np.unique(self.stratifier_)
             ptpts = self.design_['participant'].to_numpy()
         resamples = []
@@ -388,11 +388,11 @@ class BaseClass():
                     resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
                 resample = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
                 resample = np.sort(resample)
-                if validate:
+                if min_unique > 1:
                     # Check for levels with only one participant
                     resampled_strat = self.stratifier_[resample]
                     resampled_ptpts = ptpts[resample]
-                    validated = all([len(np.unique(resampled_ptpts[resampled_strat == lvl])) > 1
+                    validated = all([len(np.unique(resampled_ptpts[resampled_strat == lvl])) >= min_unique
                                      for lvl in strat_levels])
                 else:
                     validated = True
@@ -446,7 +446,7 @@ class BaseClass():
         self.n_boot_ = n_boot
         self.confint_level_ = confint_level
         # Pre-generate bootstrap samples
-        boot_idxs = self._get_resamples(n_boot, validate=self._validate_resamples, silent=silent)
+        boot_idxs = self._get_resamples(n_boot, min_unique=self._min_unique, silent=silent)
         # Run bootstraps in parallel
         # Set up container for boot_stat
         boot_stat_dist = []
@@ -574,7 +574,7 @@ class BtwnClass(BaseClass):
 
 class PLSC(BtwnClass):
     """
-    Partial least squares correlation model, also known as behavioural PLS. Used for analyzing between-participants relationships between data and covariates across multiple conditions. For analyzing within-participant correlations, see :class:`WPPLSC`.
+    Partial least squares correlation model, also known as behavioural PLS. Used for analyzing between-participants relationships between data and covariates across multiple conditions. For analyzing within-participant correlations, see :class:`WPLSC`.
     
     Parameters
     ----------
@@ -598,7 +598,7 @@ class PLSC(BtwnClass):
         super().__init__(boot_stat=boot_stat,
                          svd_method=svd_method,
                          random_state=random_state,
-                         validate_resamples=True)
+                         min_unique=2)
         self.covariates_ = None #: ``pd.dataframe``: Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
     def _setup_covariates(self, design, covariates):
         if isinstance(covariates, np.ndarray):
@@ -742,7 +742,7 @@ class BDA(BaseClass):
         super().__init__(svd_method=svd_method,
                          boot_stat=boot_stat,
                          random_state=random_state,
-                         validate_resamples=False)
+                         min_unique=1)
         self.effects = None #: ``tuple``: Effects present in the model. Set by :meth:`fit`.
     def _setup_effects(self, effects, between, within):
         if between is None and within is None:
@@ -880,9 +880,9 @@ class BDA(BaseClass):
             boot_stat = utils.get_groupwise_means(scores, resampled_strat)
         return boot_stat, resampled_data_sals
     
-class WPPLSC(BaseClass):
+class WPLSC(BaseClass):
     
-    def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
+    def __init__(self, boot_stat='score-covariate-corr', weighted=False, svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
                         boot_stat,
                         ('score-covariate-corr', 'condwise-scores'))
@@ -892,7 +892,8 @@ class WPPLSC(BaseClass):
                          validate_resamples=True)
         self.models_ = None #: ``list``: Participant-specific :class:`PLSC` models. Set by :meth:`fit`.
         self.participant_labels_ = None #: ``list``: Participants labels. Set by :meth:`fit`.
-    def fit(self, data, covariates, design=None, within=None, participant=None):
+        self.weights_ = None #: ``numpy.ndarray``: Weights, based on number of trials, applied to participant-level cross-correlation matrices when averaged together. Set by ``weighted`` argument to :meth:`fit`.
+    def fit(self, data, covariates, design=None, within=None, participant=None, weighted=False):
         """
         Fit a within-participants PLSC model.
 
@@ -908,6 +909,8 @@ class WPPLSC(BaseClass):
             List of participant-specific indicators of within-participant condition (in which case each list element must be a valid ``between`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the within-participant condition indicators.
         participant : list, optional
             A list of participant identifiers (integers or strings).
+        weighted : bool, optional
+            Specifies whether participant-level cross-covariance matrices should weighted by number of trials when averaged together. Default is False.
 
         Returns
         -------
@@ -940,10 +943,7 @@ class WPPLSC(BaseClass):
             raise ValueError('Must be as many participant identifiers as there are participant-specific data arrays.')
         self.participant_labels_ = participant
         
-        # Set up participant-specific PLSC models
-        
-        #: :type: list
-        #: Participant-specific PLSC models. In each model, the unit of observation is a single trial.
+        # Set up participant-specific PLSC models        
         self.models_ = []
         # Get seeds for participant-specific models
         ss = np.random.SeedSequence(self.random_state)
@@ -956,24 +956,42 @@ class WPPLSC(BaseClass):
                                        between=ptpt_within) # Note that a within-participants condition is between in the sense of "between-trials"
             model._setup_covariates(design=ptpt_design,
                                     covariates=ptpt_cov)
+            model.design_sal_labels_ = model._get_design_sal_labels()
             self.models_.append(model)
+        # Set weights
+        if weighted:
+            weights = []
+            for model in self.models_:
+                weights.append(len(model.data_))
+            weights = np.array(weights).astype(np.float64)
+        else:
+            weights = np.array([1]*len(self.models_)).astype(np.float64)
+        self.weights_ = weights
         # Compute within-participant stacked correlation matrices
         ptpt_Rs = []
-        for model in self.models_:
+        for model, weight in zip(self.models_, self.weights_):
             R = utils.get_stacked_cormats(
                 model.data_,
                 model.covariates_,
                 model.stratifier_)
+            R = np.arctanh(R) # Fisher z-transform
             ptpt_Rs.append(R)
-        mean_R = np.mean(ptpt_Rs, axis=0)
+        mean_R = np.average(ptpt_Rs, axis=0, weights=self.weights_)
+        mean_R = np.tanh(mean_R) # Inverse z-transform
         self.rank_ = np.linalg.matrix_rank(mean_R)
         self._initial_decomposition(mean_R)
         # Decomposition is on the average rather than the participant-wise Rs
         # Thus copy decomposition results to individual models for computing scores
         # Note that this isn't wasteful because it's one object in memory
         for model in self.models_:
-            for attr in ['design_sals_', 'singular_vals_', 'data_sals_']:
+            for attr in ['design_sals_',
+                         'singular_vals_',
+                         'data_sals_',
+                         'n_sv_']:
                 setattr(model, attr, getattr(self, attr))
+            model._fitted = True
+            model.data_scores_ = model.transform()
+            model.design_scores_ = model._get_design_scores()
     def get_scores_frame(self, lv_idx=None):
         """
         Get dataframe containing design and data scores for each trial.
@@ -1015,14 +1033,16 @@ class WPPLSC(BaseClass):
                 model.data_,
                 model.covariates_[perm],
                 model.stratifier_[perm])
+            R = np.arctanh(R)
             ptpt_Rs.append(R)
-        mean_R = np.mean(ptpt_Rs, axis=0)
+        mean_R = np.average(ptpt_Rs, axis=0, weights=self.weights_)
+        mean_R = np.tanh(mean_R)
         s = self._svd(mean_R, compute_uv=False)
         return s
-    def _get_resamples(self, n_boot, validate, silent):
+    def _get_resamples(self, n_boot, min_unique, silent):
         ptptwise_boots = []
         for model in tqdm(self.models_, desc='Getting resamples', disable=silent):
-            ptpt_boots = model._get_resamples(n_boot=n_boot, validate=validate, silent=True)
+            ptpt_boots = model._get_resamples(n_boot=n_boot, min_unique=min_unique, silent=True)
             ptptwise_boots.append(ptpt_boots)
         return list(zip(*ptptwise_boots))
     def _single_resample(self, boots, alignment_method):
@@ -1033,10 +1053,15 @@ class WPPLSC(BaseClass):
                 model.data_[boot],
                 model.covariates_[boot],
                 model.stratifier_[boot])
+            R = np.arctanh(R)
             ptpt_Rs.append(R)
         # Decompose avg cormat
-        mean_R = np.mean(ptpt_Rs, axis=0)
-        u, s, v = self._svd(mean_R)
+        mean_R = np.average(ptpt_Rs, axis=0, weights=self.weights_)
+        mean_R = np.tanh(mean_R)
+        try:
+            u, s, v = self._svd(mean_R)
+        except:
+            set_trace()
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
         ptpt_boot_stats = []
         for model, boot in zip(self.models_, boots):

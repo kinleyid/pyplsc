@@ -30,6 +30,13 @@ def fit_plsc(sample_data):
     plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
     return plsc
 
+@pytest.fixture
+def fit_wplsc(sample_data):
+    data, covariates, between, within, participant = sample_data
+    plsc = pyplsc.PLSC()
+    plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
+    return plsc
+
 def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.design_sal_labels_) == len(fit_bda.design_sals_)
