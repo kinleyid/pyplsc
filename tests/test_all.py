@@ -200,3 +200,6 @@ def test_wplsc_basic(fit_wplsc):
     fit_wplsc.get_boot_stat_frame()
     fit_wplsc.get_boot_stat_frame(lv_idx=0)
     fit_wplsc.get_boot_stat_frame(lv_idx=[0, 1])
+
+def test_utils():
+    pyplsc.utils.get_design_for_sorted(group_sizes=[3, 2], n_cond=3)
