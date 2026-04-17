@@ -940,6 +940,7 @@ class WPLSC(BaseClass):
         >>> ptptwise_n_trials = [3, 3, 4, 8, 20]
         >>> data = [np.random.normal(size=(n_trials, n_var)) for n_trials in ptptwise_n_trials]
         >>> covs = [np.random.normal(size=(n_trials, 1)) for n_trials in ptptwise_n_trials] 
+        >>> # Fit model
         >>> mod = pyplsc.WPLSC()
         >>> mod.fit(data=data, covariates=covs, weighted=True)
         """
