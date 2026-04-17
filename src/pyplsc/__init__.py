@@ -937,7 +937,7 @@ class WPLSC(BaseClass):
         --------
         >>> # Simulate null data
         >>> n_var = 10
-        >>> ptptwise_n_trials = [3, 3, 4, 8, 20]
+        >>> ptptwise_n_trials = [10, 10, 9, 8, 12]
         >>> data = [np.random.normal(size=(n_trials, n_var)) for n_trials in ptptwise_n_trials]
         >>> covs = [np.random.normal(size=(n_trials, 1)) for n_trials in ptptwise_n_trials] 
         >>> # Fit model
