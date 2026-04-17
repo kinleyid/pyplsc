@@ -932,6 +932,16 @@ class WPLSC(BaseClass):
         Returns
         -------
         None
+        
+        Examples
+        --------
+        >>> # Simulate null data
+        >>> n_var = 10
+        >>> ptptwise_n_trials = [3, 3, 4, 8, 20]
+        >>> data = [np.random.normal(size=(n_trials, n_var)) for n_trials in ptptwise_n_trials]
+        >>> covs = [np.random.normal(size=(n_trials, 1)) for n_trials in ptptwise_n_trials] 
+        >>> mod = pyplsc.WPLSC()
+        >>> mod.fit(data=data, covariates=covs, weighted=True)
         """
         if len(set(arr.shape[1] for arr in data)) > 1:
             raise ValueError('All data arrays must contain the same number of variables')
