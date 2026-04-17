@@ -64,6 +64,9 @@ def test_bda_basic(fit_bda):
     with pytest.raises(Exception):
         fit_bda.bootstrap(0)    
     fit_bda.bootstrap(n_boot=2, alignment_method='flip-data-sals')
+    fit_bda.bootstrap(n_boot=2, alignment_method='flip-design-sals')
+    fit_bda.bootstrap(n_boot=2, alignment_method='rotate-data-sals')
+    fit_bda.bootstrap(n_boot=2, alignment_method='none')
     assert fit_bda.design_scores_ is not None
     fit_bda.get_boot_stat_frame()
     fit_bda.get_boot_stat_frame(lv_idx=0)
