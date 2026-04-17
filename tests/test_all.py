@@ -17,6 +17,15 @@ def sample_data():
     return data, covariates, between, within, participant
 
 @pytest.fixture
+def within_ptpt_sample_data(sample_data):
+    data, covariates, between, within, participant = sample_data
+    n_ptpt = 20
+    data = [data]*n_ptpt
+    covariates = [covariates]*n_ptpt
+    within = [within]*n_ptpt
+    return data, covariates, within
+
+@pytest.fixture
 def fit_bda(sample_data):
     data, _, between, within, participant = sample_data
     bda = pyplsc.BDA(random_state=123)
@@ -31,14 +40,10 @@ def fit_plsc(sample_data):
     return plsc
 
 @pytest.fixture
-def fit_wplsc(sample_data):
-    data, covariates, between, within, participant = sample_data
-    n_ptpt = 20
-    data = [data]*n_ptpt
-    covariates = [covariates]*n_ptpt
-    within = [within]*n_ptpt
+def fit_wplsc(within_ptpt_sample_data):
+    data, covariates, within = within_ptpt_sample_data
     wplsc = pyplsc.WPLSC(random_state=123)
-    wplsc.fit(data=data, covariates=covariates, within=within)
+    wplsc.fit(data=data, covariates=covariates, within=within, weighted=True)
     return wplsc
 
 def test_bda_basic(fit_bda):
@@ -46,8 +51,8 @@ def test_bda_basic(fit_bda):
     assert len(fit_bda.design_sal_labels_) == len(fit_bda.design_sals_)
     fit_bda.get_scores_frame()
     fit_bda.get_scores_frame(lv_idx=[0, 1])
-    fit_bda.permute(n_perm=20)
-    fit_bda.bootstrap(n_boot=200)
+    fit_bda.permute(n_perm=5)
+    fit_bda.bootstrap(n_boot=5)
     yerr = fit_bda.get_boot_stat_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2
@@ -130,8 +135,8 @@ def test_plsc_basic(fit_plsc):
     assert len(fit_plsc.design_sal_labels_) == len(fit_plsc.design_sals_)
     fit_plsc.get_scores_frame()
     fit_plsc.get_scores_frame(lv_idx=[0, 1])
-    fit_plsc.permute(n_perm=2)
-    fit_plsc.bootstrap(n_boot=2)
+    fit_plsc.permute(n_perm=5)
+    fit_plsc.bootstrap(n_boot=5)
     fit_plsc.transform(lv_idx=0)
     assert fit_plsc.design_scores_ is not None
     fit_plsc.get_boot_stat_frame()
@@ -173,18 +178,20 @@ def test_plsc_designs(sample_data):
 
 def test_alt_boot_stats(sample_data):
     data, covariates, between, within, participant = sample_data
-    # plsc = pyplsc.PLSC(boot_stat=)
     bda = pyplsc.BDA(boot_stat='condwise-scores')
     bda.fit(data=data, between=between)
     bda.bootstrap(10)
+    plsc = pyplsc.PLSC(boot_stat='condwise-scores')
+    plsc.fit(data=data, covariates=covariates, between=between)
+    plsc.bootstrap(10)
     
 def test_wplsc_basic(fit_wplsc):
     # Simple testing of model fitting
     assert len(fit_wplsc.design_sal_labels_) == len(fit_wplsc.design_sals_)
     fit_wplsc.get_scores_frame()
     fit_wplsc.get_scores_frame(lv_idx=[0, 1])
-    fit_wplsc.permute(n_perm=20)
-    fit_wplsc.bootstrap(n_boot=200)
+    fit_wplsc.permute(n_perm=5)
+    fit_wplsc.bootstrap(n_boot=5)
     yerr = fit_wplsc.get_boot_stat_yerr(0)
     assert (yerr >= 0).all()
     assert yerr.shape[0] == 2

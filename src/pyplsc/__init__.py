@@ -893,8 +893,6 @@ class WPLSC(BaseClass):
 
         - ``'score-covariate-corr'`` (default): Correlations between covariates and data scores (i.e., output of :meth:`transform`). Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original Matlab version of PLS.
         - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
-    weighted : bool, optional
-        Specifies whether participant-wise cross-correlation matrices should be weighted by number of trials when averaged together.
     svd_method : str, optional
         Method to use for singular value decomposition. Must be one of:
             
@@ -903,7 +901,7 @@ class WPLSC(BaseClass):
     random_state : int, optional
         Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
     """
-    def __init__(self, boot_stat='score-covariate-corr', weighted=False, svd_method='lapack', random_state=None):
+    def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
                         boot_stat,
                         ('score-covariate-corr', 'condwise-scores'))
