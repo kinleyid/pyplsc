@@ -387,7 +387,6 @@ class BaseClass():
                     # Sample participants at random
                     resampled_ptpts = rng.choice(unique_ptpts, len(unique_ptpts))
                 resample = np.concatenate([rows_by_ptpt[ptpt] for ptpt in resampled_ptpts])
-                resample = np.sort(resample)
                 if min_unique > 1:
                     # Check for levels with only one participant
                     resampled_strat = self.stratifier_[resample]
@@ -888,8 +887,7 @@ class WPLSC(BaseClass):
                         ('score-covariate-corr', 'condwise-scores'))
         super().__init__(boot_stat=boot_stat,
                          svd_method=svd_method,
-                         random_state=random_state,
-                         validate_resamples=True)
+                         random_state=random_state)
         self.models_ = None #: ``list``: Participant-specific :class:`PLSC` models. Set by :meth:`fit`.
         self.participant_labels_ = None #: ``pandas.Categorical``: Participants labels. Set by :meth:`fit`.
         self.weights_ = None #: ``numpy.ndarray``: Weights, based on number of trials, applied to participant-level cross-correlation matrices when averaged together. Set by ``weighted`` argument to :meth:`fit`.
@@ -939,8 +937,8 @@ class WPLSC(BaseClass):
             raise ValueError('Must be as many participant-specific sets of covariates as there are participant-specific data arrays.')
         if len(within) != len(data):
             raise ValueError('Must be as many participant-specific sets of condition indicators as there are participant-specific data arrays.')
-        if len(participant) != len(data):
-            raise ValueError('Must be as many participant identifiers as there are participant-specific data arrays.')
+        if len(np.unique(participant)) != len(data):
+            raise ValueError('Must be as many unique participant identifiers as there are participant-specific data arrays.')
         self.participant_labels_ = pd.Categorical(participant)
         
         # Set up participant-specific PLSC models        
@@ -992,6 +990,7 @@ class WPLSC(BaseClass):
             model._fitted = True
             model.data_scores_ = model.transform()
             model.design_scores_ = model._get_design_scores()
+        # TODO: compute boot_stat
     def get_scores_frame(self, lv_idx=None):
         """
         Get dataframe containing design and data scores for each trial.
@@ -1040,41 +1039,84 @@ class WPLSC(BaseClass):
         s = self._svd(mean_R, compute_uv=False)
         return s
     def _get_resamples(self, n_boot, min_unique, silent):
-        ptptwise_boots = []
-        for model in tqdm(self.models_, desc='Getting resamples', disable=silent):
-            ptpt_boots = model._get_resamples(n_boot=n_boot, min_unique=min_unique, silent=True)
-            ptptwise_boots.append(ptpt_boots)
-        return list(zip(*ptptwise_boots))
-    def _single_resample(self, boots, alignment_method):
-        # Compute stacked cormats within ptpts
+        rng = np.random.default_rng(self.random_state)
+        # Do this in 2 steps. First, for each resample, generate an array indexing
+        # the participants to be included in the resample. I.e. get a list of
+        # resample-wise participant indices
+        resamplewise_ptpts = []
+        for boot_n in tqdm(range(n_boot), desc='Getting participant resamples', disable=silent):
+            # TODO: between condition (actually quite simple; see _get_resamples above)
+            ptpt_resample = rng.choice(self.participant_labels_.codes,
+                                       len(self.participant_labels_))
+            resamplewise_ptpts.append(ptpt_resample)
+        # Next, for each participant, pre-generate resampled trials. Do this for
+        # as many times as the participant will be resampled. The reason we're
+        # doing this in 2 steps is because _get_resamples resets the RNG so we can
+        # only call it once per participant
+        _, ptpt_counts = np.unique(np.concat(resamplewise_ptpts), return_counts=True)
+        ptptwise_trial_resamples = []
+        for ptpt_idx in tqdm(self.participant_labels_.codes, desc='Getting trial resamples', disable=silent):
+            n_ptpt_boot = ptpt_counts[ptpt_idx]
+            model = self.models_[ptpt_idx]
+            ptpt_boots = model._get_resamples(n_boot=n_ptpt_boot,
+                                              min_unique=3, # 2 would yield a correlation of +/- 1, which gives infinite atanh
+                                              silent=True)
+            ptpt_boots = iter(ptpt_boots) # When we're looping over resamples, we'll call next() to get a unique trial resample
+            ptptwise_trial_resamples.append(ptpt_boots)
+        # Next, combine them
+        final_resample_idx = []
+        for boot_n in range(n_boot): # No need for tqdm because this should be ultra quick---it's just re-organizing data
+            # Which participants were resampled on this iteration?
+            ptpt_idxs = resamplewise_ptpts[boot_n]
+            trial_idxs = []
+            # For each resampled participant, get a trial indexer specific to this iteration
+            for ptpt_idx in ptpt_idxs:
+                trial_resamples = ptptwise_trial_resamples[ptpt_idx]
+                trial_idxs.append(next(trial_resamples))
+            # Final result that specifies the current resample is a set of participant
+            # identifiers (used for accessing a participant's data) and a set of
+            # corresponding trial indices (used for accessing that paticipant's)
+            # resampled trials
+            final_resample_idx.append((ptpt_idxs, trial_idxs))
+        return final_resample_idx
+    def _single_resample(self, resample_idx, alignment_method):
+        # Compute stacked cormats within ptpts and then average
         ptpt_Rs = []
-        for model, boot in zip(self.models_, boots):
+        ptpt_idxs, ptptwise_trial_idx = resample_idx
+        for ptpt_idx, trial_idx in zip(ptpt_idxs, ptptwise_trial_idx):
+            model = self.models_[ptpt_idx]
             R = utils.get_stacked_cormats(
-                model.data_[boot],
-                model.covariates_[boot],
-                model.stratifier_[boot])
+                model.data_[trial_idx],
+                model.covariates_[trial_idx],
+                model.stratifier_[trial_idx])
             R = np.arctanh(R)
             ptpt_Rs.append(R)
         # Decompose avg cormat
-        mean_R = np.average(ptpt_Rs, axis=0, weights=self.weights_)
+        mean_R = np.average(ptpt_Rs,
+                            axis=0,
+                            weights=self.weights_[ptpt_idxs]) # !!! Note that resample needs to be applied to weights
         mean_R = np.tanh(mean_R)
-        try:
-            u, s, v = self._svd(mean_R)
-        except:
-            set_trace()
+        u, s, v = self._svd(mean_R)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
+        # Compute boot_stat within ptpts and then average
         ptpt_boot_stats = []
-        for model, boot in zip(self.models_, boots):
-            scores = model.transform(model.data_[boot])
+        for ptpt_idx, trial_idx in zip(ptpt_idxs, ptptwise_trial_idx):
+            model = self.models_[ptpt_idx]
+            scores = model.transform(model.data_[trial_idx])
             if self.boot_stat == 'score-covariate-corr':
                 stat = utils.get_stacked_cormats(
                     scores,
-                    model.covariates_[boot],
-                    model.stratifier_[boot])
+                    model.covariates_[trial_idx],
+                    model.stratifier_[trial_idx])
+                stat = np.atanh(stat) # z-transform since this is a correlation
             elif self.boot_stat == 'condwise-scores':
                 stat = utils.get_groupwise_means(
                     scores,
-                    model.stratifier_[boot])
+                    model.stratifier_[trial_idx])
             ptpt_boot_stats.append(stat)
-        boot_stat = np.mean(ptpt_boot_stats, axis=0)
+        boot_stat = np.average(ptpt_boot_stats,
+                               axis=0,
+                               weights=self.weights_[ptpt_idxs])
+        if self.boot_stat == 'score-covariate-corr':
+            boot_stat = np.tanh(boot_stat) # back-transform from fisher z
         return boot_stat, resampled_data_sals

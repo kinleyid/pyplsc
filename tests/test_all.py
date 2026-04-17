@@ -173,3 +173,26 @@ def test_alt_boot_stats(sample_data):
     bda = pyplsc.BDA(boot_stat='condwise-scores')
     bda.fit(data=data, between=between)
     bda.bootstrap(10)
+    
+def test_wplsc_basic(fit_wplsc):
+    # Simple testing of model fitting
+    assert len(fit_wplsc.design_sal_labels_) == len(fit_wplsc.design_sals_)
+    fit_wplsc.get_scores_frame()
+    fit_wplsc.get_scores_frame(lv_idx=[0, 1])
+    fit_wplsc.permute(n_perm=20)
+    fit_wplsc.bootstrap(n_boot=200)
+    yerr = fit_wplsc.get_boot_stat_yerr(0)
+    assert (yerr >= 0).all()
+    assert yerr.shape[0] == 2
+    with pytest.raises(Exception):
+        yerr = fit_wplsc.get_design_yerr([0, 1])
+    fit_wplsc.transform(lv_idx=0)
+    with pytest.raises(Exception):
+        fit_wplsc.permute(0)
+    with pytest.raises(Exception):
+        fit_wplsc.bootstrap(0)    
+    fit_wplsc.bootstrap(n_boot=2, alignment_method='flip-data-sals')
+    assert fit_wplsc.design_scores_ is not None
+    fit_wplsc.get_boot_stat_frame()
+    fit_wplsc.get_boot_stat_frame(lv_idx=0)
+    fit_wplsc.get_boot_stat_frame(lv_idx=[0, 1])
