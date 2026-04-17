@@ -27,17 +27,34 @@ def _check_str_arg(argname, provided, allowed):
         raise BadStrArgError(argname, provided, allowed)
 
 class BaseClass():
-    # Parent class for BDA and PLSC.
+    # Parent class for PLSC, BDA, and WPPLSC.
     def __init__(self, svd_method='lapack', boot_stat=None, validate_resamples=False, random_state=None):
         _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
-        # Private properties for tracking whether permutation testing and bootstrap resampling have been done
+        # Private attributes for tracking whether permutation testing and bootstrap resampling have been done
         self._fitted = False
         self._reset()
         self._validate_resamples = validate_resamples
-        # Public properties
-        self.svd_method = svd_method
-        self.boot_stat = boot_stat
-        self.random_state = random_state
+        # Document inheritable attributes in one place; requires initializing many to None but worth it imo
+        # Attributes set by __init__()
+        self.svd_method = svd_method #: ``str``: SVD method used
+        self.boot_stat = boot_stat #: ``str``: Name of statistic whose distribution is derived during bootstrap resampling.
+        self.random_state = random_state #: ``int``: Random state for reproducible permutation and bootstrap resampling.
+        # Attributes set by fit()
+        self.boot_stat_val_ = None #: ``numpy.ndarray`` Point estimate from initial decomposition of statistic whose distribution is derived during :meth:`bootstrap` resampling. Set by :meth:`fit`.
+        self.data_ = None #: ``numpy.ndarray``: Data used to fit model. Set by :meth:`fit`.
+        self.data_sals_ = None #: ``numpy.ndarray``: Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`.
+        self.design_sals_ = None #: ``numpy.ndarray``: Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
+        self.n_sv_ = None #: ``int``: Number of singular values, i.e., the number of latent variable pairs in the model. Set by :meth:`fit`.
+        self.singular_vals_ = None #: ``numpy.ndarray``:  Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
+        self.variance_explained_ = None #: ``np.ndarray``: Proportion of variance explained by each latent variable pair. Set by :meth:`fit`.
+        # Attributes set by permute()
+        self.pvals_ = None #: ``numpy.ndarray``: Permutation p values for the latent variable pairs. Set by :meth:`permute`.
+        # Attributes set by bootstrap()
+        self.boot_stat_ci_ = None #: ``numpy.ndarray``: Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level_`.
+        self.confint_level_ = None #: ``float``: Level of confidence interval on stat named by :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95). Set by :meth:`bootstrap`.
+        self.data_sals_std_ = None #: ``numpy.ndarray``: Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+        self.data_sals_z_ = None #: ``numpy.ndarray``: Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
+        self.n_boot_ = None #: ``int``: Number of bootstrap resamples used. Set by :meth:`bootstrap`.
     def _reset(self):
         # Reset variables that track whether perm_done and boot_done
         self._perm_done = False
@@ -58,7 +75,7 @@ class BaseClass():
             raise ValueError('data must be a 1- or 2-dimensional numpy array')
         self.data_ = data
     def _setup_design_matrix(self, design=None, between=None, within=None, participant=None):
-        # Add design_matrix_ and stratifier_ as properties
+        # Add design_matrix_ and stratifier_ as attributes
         if participant is None:
             if within is not None:
                 raise ValueError('Participants must be differentiated if there is a within-participants factor')
@@ -114,7 +131,7 @@ class BaseClass():
             out = s
         return out
     def _initial_decomposition(self, to_factorize):
-        # Initial fit and add various properties
+        # Initial fit and add various attributes
         u, s, v = self._svd(to_factorize)
         self.singular_vals_ = s
         self.n_sv_ = len(s)
@@ -189,7 +206,7 @@ class BaseClass():
         if self._boot_done:
             self.data_sals_z_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
-            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...] # TODO: check that this logic is correct
+            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
     def transform(self, data=None, lv_idx=None):
         """
         Compute data scores, i.e., coordinates of array data in the new basis defined by the latent variables, by multiplying a data array by the data saliences (the :attr:`data_sals_` property)
@@ -222,7 +239,7 @@ class BaseClass():
         return data_scores
     def get_scores_frame(self, lv_idx=None):
         """
-        Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the design matrix (:attr:`design_`). Data is in long format, with a column specifying the latent variable corresponding to each score.
+        Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the design matrix (:attr:`design_`).
 
         Parameters
         ----------
@@ -233,7 +250,14 @@ class BaseClass():
         -------
         df : pandas.dataframe
             Dataframe containing design and data scores for each observation.
-
+            
+        Notes
+        -----
+        Data is in long format, with a column specifying the latent variable corresponding to each score.
+            
+        Examples
+        --------
+        >>> mod.get_scores_frame().to_csv('scores.csv')
         """
         if not self._fitted:
             raise NotFittedError()
@@ -431,7 +455,7 @@ class BaseClass():
         mean = np.zeros_like(self.data_sals_)
         M2 = np.zeros_like(self.data_sals_)
         results = Parallel(n_jobs=n_jobs, prefer="threads", return_as="generator")(
-            delayed(self._single_bootstrap_resample)(boot_idx, alignment_method)
+            delayed(self._single_resample)(boot_idx, alignment_method)
             for boot_idx in boot_idxs
         )
         count = 0
@@ -538,9 +562,19 @@ class BaseClass():
         df = df.reset_index(drop=True)
         return df
   
-class PLSC(BaseClass):
+class BtwnClass(BaseClass):
+    # Class for models that are not trial-level
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Document inheritable attributes unique to these model types
+        self.design_ = None #: ``pandas.DataFrame``: Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
+        self.design_sal_labels_ = None #: ``pandas.DataFrame``: Dataframe with rows corresponding to rows of the design saliences and columns specifying between-participants conditions, within-participants conditions, and covarites. Set by :meth:`fit`.
+        self.stratifier_ = None #: ``numpy.ndarray``: Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
+        self.design_scores_ = None #: ``numpy.ndarray`` Design scores for the data used to fit the model. Set by :meth:`fit`.
+
+class PLSC(BtwnClass):
     """
-    Partial least squares correlation model, also known as behavioural PLS. Used for analyzing relationships between data and covariates across multiple conditions.
+    Partial least squares correlation model, also known as behavioural PLS. Used for analyzing between-participants relationships between data and covariates across multiple conditions. For analyzing within-participant correlations, see :class:`WPPLSC`.
     
     Parameters
     ----------
@@ -556,53 +590,6 @@ class PLSC(BaseClass):
         - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
     random_state : int, optional
         Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
-    
-    Attributes
-    ----------
-    boot_stat : str
-        Name of statistic whose distribution is derived during bootstrap resampling.
-    boot_stat_val_ : numpy.ndarray
-        Point estimate from initial decomposition of statistic whose distribution is derived during :meth:`bootstrap` resampling. Set by :meth:`fit`.
-    boot_stat_ci_ : numpy.ndarray
-        Confidence interval on stat named by :attr:`boot_stat` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
-    confint_level_ : float
-        Level of confidence interval on stat named by :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
-    covariates_ : pandas.DataFrame
-        Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
-    data_ : numpy.ndarray
-        Data used to fit model.
-    data_sals_ : numpy.ndarray
-        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
-    data_sals_std_ : numpy.ndarray
-        Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
-    data_sals_z_ : numpy.ndarray
-        Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
-    design_ : pandas.DataFrame
-        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
-    design_sal_labels_ : pandas.DataFrame
-        Dataframe with rows corresponding to rows of the design saliences and columns specifying between-participants conditions, within-participants conditions, and covarites.
-    design_sals_ : numpy.ndarray
-        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
-    design_scores_ : numpy.ndarray
-        Design scores for the data used to fit the model. Set by :meth:`fit`.
-    n_boot_ : int
-        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
-    n_sv_ : int
-        Number of singular values, i.e., the number of latent variable pairs in the model. Set by :meth:`fit`.
-    pre_subtract : str
-        Pre-centering method used when computing mean-centred data.
-    pvals_ : numpy.ndarray
-        Permutation p values for the latent variables. Set by :meth:`permute`.
-    random_state : int
-        Random state for reproducible permutation and bootstrap resampling.
-    singular_vals_ : numpy.ndarray
-        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
-    stratifier_ : numpy.ndarray
-        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
-    svd_method : str
-        Method to use for SVD.
-    variance_explained_
-        Proportion of variance explained by each latent variable pair. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
@@ -612,6 +599,7 @@ class PLSC(BaseClass):
                          svd_method=svd_method,
                          random_state=random_state,
                          validate_resamples=True)
+        self.covariates_ = None #: ``pd.dataframe``: Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
     def _setup_covariates(self, design, covariates):
         if isinstance(covariates, np.ndarray):
             if covariates.ndim == 1:
@@ -701,14 +689,14 @@ class PLSC(BaseClass):
             # Condition-wise brain scores
             val = utils.get_groupwise_means(scores, self.stratifier_)
         self.boot_stat_val_ = val
-    def _single_permutation(self, perm_idx):
+    def _single_permutation(self, perm):
         R = utils.get_stacked_cormats(
             self.data_,
-            self.covariates_[perm_idx],
-            self.stratifier_[perm_idx])
+            self.covariates_[perm],
+            self.stratifier_[perm])
         s = self._svd(R, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, resample_idx, alignment_method):
+    def _single_resample(self, resample_idx, alignment_method):
         # Run decomposition
         resampled_data = self.data_[resample_idx]
         resampled_cov = self.covariates_[resample_idx]
@@ -746,51 +734,6 @@ class BDA(BaseClass):
         - ``'randomized'``: use ``sklearn.utils.extmath.randomized_svd``.
     random_state : int, optional
         Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
-    
-    Attributes
-    ----------
-    boot_stat : str
-        Name of statistic whose distribution is derived during bootstrap resampling.
-    boot_stat_val_ : numpy.ndarray
-        Point estimate from initial decomposition of statistic whose distribution is derived during bootstrap resampling. Set by :meth:`fit`.
-    boot_stat_ci_ : numpy.ndarray
-        Confidence interval on :attr:`boot_stat_val_` derived from bootstrap resampling. Set by :meth:`bootstrap`. CI level is determined by :attr:`confint_level`.
-    confint_level_ : float
-        Level of confidence interval on :attr:`boot_stat` to derive during bootstrap resampling (e.g., 0.95).
-    data_ : numpy.ndarray
-        Data used to fit model.
-    data_sals_ : numpy.ndarray
-        Right saliences/singular vectors used to compute data scores. Shape (n. observed vars, n. latent vars). Set by :meth:`fit`
-    data_sals_std_ : numpy.ndarray
-        Standard deviations of data saliences (:attr:`data_sals_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
-    data_sals_z_ : numpy.ndarray
-        Data saliences (:attr:`data_sals_`) divided by their standard deviations (:attr:`data_sals_std_`) as estimated during bootstrap resampling. Set by :meth:`bootstrap`.
-    design_ : pandas.DataFrame
-        Design matrix with columns "between", "within", and "participant". Set by :meth:`fit`.
-    design_sal_labels_ : pandas.DataFrame
-        Dataframe with rows corresponding to rows of the design saliences and columns specifying between-participants conditions and within-participants conditions.
-    design_sals_ : numpy.ndarray
-        Left saliences/singular vectors used to compute design scores. Shape (n. design saliences, n.latent variables). Set by :meth:`fit`.
-    design_scores_ : numpy.ndarray
-        Design scores for the data used to fit the model. Set by :meth:`fit`.
-    n_boot_ : int
-        Number of bootstrap resamples used. Set by :meth:`bootstrap`.
-    n_sv_ : int
-        Number of latent variables in the model. Set by :meth:`fit`.
-    pre_subtract : str
-        Pre-centering method used when computing mean-centred data.
-    pvals_ : numpy.ndarray
-        Permutation p values for the latent variables. Set by :meth:`permute`.
-    random_state : int
-        Random state for reproducible permutation and bootstrap resampling.
-    singular_vals_ : numpy.ndarray
-        Singular values from the decomposition of the mean-centred data. Set by :meth:`fit`.
-    stratifier_ : numpy.ndarray
-        Integer array that indexes each unique combination of between- and within-participants condition. Used to stratify the data for mean-centering. Set by :meth:`fit`.
-    svd_method : str
-        Method to use for SVD.
-    variance_explained_
-        Proportion of variance explained by each latent variable pair. Set by :meth:`fit`.
     """
     def __init__(self, boot_stat='condwise-scores-centred', svd_method='lapack', random_state=None):
         _check_str_arg('boot_stat',
@@ -800,6 +743,7 @@ class BDA(BaseClass):
                          boot_stat=boot_stat,
                          random_state=random_state,
                          validate_resamples=False)
+        self.effects = None #: ``tuple``: Effects present in the model. Set by :meth:`fit`.
     def _setup_effects(self, effects, between, within):
         if between is None and within is None:
             raise ValueError('Observations must be differentiated by some categorical variable (specified via "between" or "within") for BDA')
@@ -910,14 +854,14 @@ class BDA(BaseClass):
             val = utils.get_groupwise_means(data_scores, self.stratifier_)
         self.boot_stat_val_ = val
         return self
-    def _single_permutation(self, perm_idx):
+    def _single_permutation(self, perm):
         # Compute SVD for this permutation
         mean_centred = self._get_mean_centred(
-            design=self.design_.iloc[perm_idx],
-            stratifier=self.stratifier_[perm_idx])
+            design=self.design_.iloc[perm],
+            stratifier=self.stratifier_[perm])
         s = self._svd(mean_centred, compute_uv=False)
         return s
-    def _single_bootstrap_resample(self, resample_idx, alignment_method):
+    def _single_resample(self, resample_idx, alignment_method):
         # Run decomposition
         resampled_data = self.data_[resample_idx]
         resampled_design = self.design_.iloc[resample_idx]
@@ -934,4 +878,178 @@ class BDA(BaseClass):
         elif self.boot_stat == 'condwise-scores':
             scores = resampled_data @ self.data_sals_
             boot_stat = utils.get_groupwise_means(scores, resampled_strat)
+        return boot_stat, resampled_data_sals
+    
+class WPPLSC(BaseClass):
+    
+    def __init__(self, boot_stat='score-covariate-corr', svd_method='lapack', random_state=None):
+        _check_str_arg('boot_stat',
+                        boot_stat,
+                        ('score-covariate-corr', 'condwise-scores'))
+        super().__init__(boot_stat=boot_stat,
+                         svd_method=svd_method,
+                         random_state=random_state,
+                         validate_resamples=True)
+        self.models_ = None #: ``list``: Participant-specific :class:`PLSC` models. Set by :meth:`fit`.
+        self.participant_labels_ = None #: ``list``: Participants labels. Set by :meth:`fit`.
+    def fit(self, data, covariates, design=None, within=None, participant=None):
+        """
+        Fit a within-participants PLSC model.
+
+        Parameters
+        ----------
+        data : list
+            List of participant-specific data arrays. Each should be a ``numpy.ndarray`` of shape (n. trials, n. observed vars).
+        covariates : list or str
+            List of participant-specific covariates (in which case each list element must be a valid ``covariates`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the covariates.
+        design : list, optional
+            List of participant-specific design matrices. Each list element must be a valid ``design`` argument to :class:`PLSC.fit`. The default is ``None``.
+        within : list or str, optional
+            List of participant-specific indicators of within-participant condition (in which case each list element must be a valid ``between`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the within-participant condition indicators.
+        participant : list, optional
+            A list of participant identifiers (integers or strings).
+
+        Returns
+        -------
+        None
+        """
+        if len(set(arr.shape[1] for arr in data)) > 1:
+            raise ValueError('All data arrays must contain the same number of variables')
+        if design is None:
+            design = [None]*len(data)
+        if within is None:
+            within = [None]*len(data)
+        if participant is None:
+            participant = ['participant-%s' % n for n in range(len(data))]
+        # Handle case where covariates/within are column names
+        # Turn single strings into one-element lists
+        if isinstance(covariates, str):
+            covariates = [covariates]
+        if isinstance(within, str):
+            within = [within]
+        # If str, just replicate for each participant
+        if isinstance(covariates[0], str):
+            covariates = [covariates]*len(data)
+        if isinstance(within[0], str):
+            within = [within]*len(data)
+        if len(covariates) != len(data):
+            raise ValueError('Must be as many participant-specific sets of covariates as there are participant-specific data arrays.')
+        if len(within) != len(data):
+            raise ValueError('Must be as many participant-specific sets of condition indicators as there are participant-specific data arrays.')
+        if len(participant) != len(data):
+            raise ValueError('Must be as many participant identifiers as there are participant-specific data arrays.')
+        self.participant_labels_ = participant
+        
+        # Set up participant-specific PLSC models
+        
+        #: :type: list
+        #: Participant-specific PLSC models. In each model, the unit of observation is a single trial.
+        self.models_ = []
+        # Get seeds for participant-specific models
+        ss = np.random.SeedSequence(self.random_state)
+        seeds = ss.spawn(len(data))
+        for ptpt_data, ptpt_cov, ptpt_design, ptpt_within, seed in zip(data, covariates, design, within, seeds):
+            model = PLSC(random_state=seed)
+            # Set up data using internal API but don't fit participant-level models
+            model._setup_data(ptpt_data)
+            model._setup_design_matrix(design=ptpt_design,
+                                       between=ptpt_within) # Note that a within-participants condition is between in the sense of "between-trials"
+            model._setup_covariates(design=ptpt_design,
+                                    covariates=ptpt_cov)
+            self.models_.append(model)
+        # Compute within-participant stacked correlation matrices
+        ptpt_Rs = []
+        for model in self.models_:
+            R = utils.get_stacked_cormats(
+                model.data_,
+                model.covariates_,
+                model.stratifier_)
+            ptpt_Rs.append(R)
+        mean_R = np.mean(ptpt_Rs, axis=0)
+        self.rank_ = np.linalg.matrix_rank(mean_R)
+        self._initial_decomposition(mean_R)
+        # Decomposition is on the average rather than the participant-wise Rs
+        # Thus copy decomposition results to individual models for computing scores
+        # Note that this isn't wasteful because it's one object in memory
+        for model in self.models_:
+            for attr in ['design_sals_', 'singular_vals_', 'data_sals_']:
+                setattr(model, attr, getattr(self, attr))
+    def get_scores_frame(self, lv_idx=None):
+        """
+        Get dataframe containing design and data scores for each trial.
+
+        Parameters
+        ----------
+        lv_idx : indexer, optional
+            Index of latent variable(s) for which to include design and data scores. The default is None, which includes scores for all latent variables.
+
+        Returns
+        -------
+        df : pandas.dataframe
+            Dataframe containing design and data scores for each trial.
+            
+        Notes
+        -----
+        Data is in long format, with a column specifying the latent variable corresponding to each score.
+            
+        Examples
+        --------
+        >>> mod.get_scores_frame().to_csv('scores.csv')
+        """
+        ptpt_dfs = []
+        for model, label in zip(self.models_, self.participant_labels_):
+            df = model.get_scores_frame(lv_idx)
+            df['participant'] = label
+            ptpt_dfs.append(df)
+        return pd.concat(ptpt_dfs)
+    def _get_permutations(self, n_perm, silent):
+        ptptwise_perms = []
+        for model in tqdm(self.models_, desc='Getting permutations', disable=silent):
+            ptpt_perms = model._get_permutations(n_perm=n_perm, silent=True)
+            ptptwise_perms.append(ptpt_perms)
+        return list(zip(*ptptwise_perms))
+    def _single_permutation(self, perms):
+        ptpt_Rs = []
+        for model, perm in zip(self.models_, perms):
+            R = utils.get_stacked_cormats(
+                model.data_,
+                model.covariates_[perm],
+                model.stratifier_[perm])
+            ptpt_Rs.append(R)
+        mean_R = np.mean(ptpt_Rs, axis=0)
+        s = self._svd(mean_R, compute_uv=False)
+        return s
+    def _get_resamples(self, n_boot, validate, silent):
+        ptptwise_boots = []
+        for model in tqdm(self.models_, desc='Getting resamples', disable=silent):
+            ptpt_boots = model._get_resamples(n_boot=n_boot, validate=validate, silent=True)
+            ptptwise_boots.append(ptpt_boots)
+        return list(zip(*ptptwise_boots))
+    def _single_resample(self, boots, alignment_method):
+        # Compute stacked cormats within ptpts
+        ptpt_Rs = []
+        for model, boot in zip(self.models_, boots):
+            R = utils.get_stacked_cormats(
+                model.data_[boot],
+                model.covariates_[boot],
+                model.stratifier_[boot])
+            ptpt_Rs.append(R)
+        # Decompose avg cormat
+        mean_R = np.mean(ptpt_Rs, axis=0)
+        u, s, v = self._svd(mean_R)
+        resampled_data_sals = self._align(u, s, v, method=alignment_method)
+        ptpt_boot_stats = []
+        for model, boot in zip(self.models_, boots):
+            scores = model.transform(model.data_[boot])
+            if self.boot_stat == 'score-covariate-corr':
+                stat = utils.get_stacked_cormats(
+                    scores,
+                    model.covariates_[boot],
+                    model.stratifier_[boot])
+            elif self.boot_stat == 'condwise-scores':
+                stat = utils.get_groupwise_means(
+                    scores,
+                    model.stratifier_[boot])
+            ptpt_boot_stats.append(stat)
+        boot_stat = np.mean(ptpt_boot_stats, axis=0)
         return boot_stat, resampled_data_sals
