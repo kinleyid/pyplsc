@@ -208,7 +208,7 @@ class BaseClass():
             self.boot_stat_ci_[..., lv_idx] *= -1
             self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
     def _get_data(self):
-        # This is designed to be overwritten by WPLSC
+        # This exists to be overwritten by WPLSC
         return self.data_
     def transform(self, data=None, lv_idx=None):
         """
@@ -891,8 +891,8 @@ class WPLSC(BaseClass):
     boot_stat : str, optional
         Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
-        - ``'score-covariate-corr'`` (default): Correlations between covariates and data scores (i.e., output of :meth:`transform`). Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original Matlab version of PLS.
-        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
+        - ``'score-covariate-corr'`` (default): Correlations between covariates and data scores (i.e., output of :meth:`transform`), computed within participants and averaged. Covariates and data may be original or resampled but scores are always computed by multiplying data by :attr:`data_sals_` (i.e., the saliences from the initial decomposition). This is the what is computed in the original Matlab version of PLS.
+        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`, computed within participants and averaged. 
     svd_method : str, optional
         Method to use for singular value decomposition. Must be one of:
             
