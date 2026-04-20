@@ -9,3 +9,4 @@ Below are some examples of how to use ``pyplsc`` with simulated data.
 
    notebooks/PLSC
    notebooks/BDA
+   notebooks/WPLSC
