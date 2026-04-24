@@ -5,9 +5,11 @@
 
 ## Background
 
-PLSC is a multivariate statistical technique used in neuroscience ([McIntosh et al., 1994](https://doi.org/10.1006/nimg.1996.0016); [McIntosh & Lobaugh, 2004](https://doi.org/10.1016/j.neuroimage.2004.07.020); [Krishnan et al., 2011](https://doi.org/10.1016/j.neuroimage.2010.07.034)), among other fields. It uses compact singular value decomposition (SVD) to analyze relationships between a multivariate data array and a design matrix. When the object of study is brain-behaviour correlations or functional connectivity, this method is referred to as "behaviour PLSC" or "seed PLSC". In `pyplsc`, these are implemented by the `PLSC()` model class.
+PLSC is a multivariate statistical technique used in neuroscience ([McIntosh et al., 1994](https://doi.org/10.1006/nimg.1996.0016); [McIntosh & Lobaugh, 2004](https://doi.org/10.1016/j.neuroimage.2004.07.020); [Krishnan et al., 2011](https://doi.org/10.1016/j.neuroimage.2010.07.034)), among other fields. It uses compact singular value decomposition (SVD) to analyze relationships between a multivariate data array and a design matrix. When the object of study is brain-behaviour correlations or functional connectivity, this method is referred to as "behaviour PLSC" or "seed PLSC". In `pyplsc`, these are implemented by the `PLSC` model class.
 
 Multivariate categorical differences across experimental conditions can also be analyzed by applying SVD to matrices of condition-wise averages. This approach is called "mean-centred PLSC" or "barycentric discriminant analysis" (BDA; [Abdi et al., 2018](https://doi.org/10.1007/978-1-4614-7163-9_110192-2)) and is implemented in `pyplsc` by the `BDA` model class.
+
+Finally, associations between continuous variables within participants (e.g., trial-by-trial ratings versus brain data) can be analyzed using within-participants PLS [Roberts et al., 2016](https://doi.org/10.1016/j.neuroimage.2016.04.028) as implemented in the `WPLSC` model class.
 
 ## Installation
 

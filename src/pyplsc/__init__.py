@@ -201,6 +201,7 @@ class BaseClass():
         if lv_idx is None:
             lv_idx = range(self.n_sv_)
         self.design_sals_[:, lv_idx] *= -1
+        self.design_scores_[:, lv_idx] *= -1 # These are just computed once so need to be reversed
         self.data_sals_[:, lv_idx] *= -1
         self.boot_stat_val_[:, lv_idx] *= -1
         if self._boot_done:
