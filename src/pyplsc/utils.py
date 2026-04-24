@@ -31,6 +31,26 @@ def get_stratifier(design, output='ints'):
         stratifier = multi_idx.to_list()
     return stratifier
 
+def get_covariates_array(design, covariates):
+    # Take flexible input, return covariates as array and list of names
+    if isinstance(covariates, np.ndarray):
+        if covariates.ndim == 1:
+            # Reshape to column array
+            covariates = covariates.reshape((len(covariates), 1))
+        covariate_array = covariates
+        covariate_names = ['cov%s' % i for i in range(covariates.shape[1])]
+    else:
+        if isinstance(covariates, pd.DataFrame):
+            covariate_array = covariates.to_numpy()
+            covariate_names = covariates.columns.to_list()
+        else:
+            try:
+                covariate_array = design[covariates].to_numpy()
+                covariate_names = list(covariates)
+            except:
+                raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
+    return covariate_array, covariate_names
+
 def get_groupwise_means(data, group_idx):
     n_groups = group_idx.max() + 1
     # Initialize

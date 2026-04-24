@@ -603,25 +603,10 @@ class PLSC(BtwnClass):
                          min_unique=2)
         self.covariates_ = None #: ``pd.dataframe``: Data frame containing covariate data. One column per covariate, one row per observation. Set by :meth:`fit`.
     def _setup_covariates(self, design, covariates):
-        if isinstance(covariates, np.ndarray):
-            if covariates.ndim == 1:
-                # Reshape to column array
-                covariates = covariates.reshape((len(covariates), 1))
-            covariate_array = covariates
-            covariate_names = ['cov%s' % i for i in range(covariates.shape[1])]
-        else:
-            if isinstance(covariates, pd.DataFrame):
-                covariate_array = covariates.to_numpy()
-                covariate_names = covariates.columns.to_list()
-            else:
-                try:
-                    covariate_array = design[covariates].to_numpy()
-                    covariate_names = covariates
-                except:
-                    raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
-        if len(covariate_array) != len(self.data_):
+        covariates_array, covariate_names = utils.get_covariates_array(design, covariates)
+        if len(covariates_array) != len(self.data_):
             raise ValueError('Must be as many covariate rows as data rows')
-        self.covariates_ = covariate_array
+        self.covariates_ = covariates_array
         self.covariate_names_ = covariate_names
     def _get_design_scores(self):
         # Initialize
