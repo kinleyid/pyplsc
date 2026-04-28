@@ -36,7 +36,10 @@ def get_covariates_array(design, covariates):
     if isinstance(covariates, np.ndarray):
         # covariates is an array---add custom names
         covariate_array = covariates
-        covariate_names = ['cov%s' % i for i in range(covariates.shape[1])]
+        if covariate_array.ndim == 1:
+            # Reshape to column array
+            covariate_array = covariate_array.reshape((len(covariates), 1))
+        covariate_names = ['cov%s' % i for i in range(covariate_array.shape[1])]
     else:
         if isinstance(covariates, pd.DataFrame):
             # covariates is a dataframe
@@ -56,6 +59,7 @@ def get_covariates_array(design, covariates):
                 raise ValueError('Covariates must be a DataFrame or ndarray, or the names of the columns in the design matrix that contain the covariates')
     if covariate_array.ndim == 1:
         # Reshape to column array
+        # Not redundant with earlier
         covariate_array = covariate_array.reshape((len(covariates), 1))
     return covariate_array, covariate_names
 
