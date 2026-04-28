@@ -211,3 +211,7 @@ def test_wplsc_basic(fit_wplsc):
 
 def test_utils():
     pyplsc.utils.get_design_for_sorted(group_sizes=[3, 2], n_cond=3)
+
+def test_summary(fit_bda, fit_plsc):
+    fit_bda.summary()
+    fit_plsc.summary()

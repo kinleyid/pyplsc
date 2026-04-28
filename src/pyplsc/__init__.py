@@ -178,6 +178,26 @@ class BaseClass():
             labels = condition_labels
         labels = labels.reset_index(drop=True)
         return labels
+    def summary(self):
+        """
+        Summarize the model.
+
+        Returns
+        -------
+        :class:`pandas.DataFrame`
+            Data frame with one row per latent variable pair.
+        """
+        
+        df = pd.DataFrame({
+            'LV index': range(self.n_sv_),
+            'singular value': self.singular_vals_,
+            'variance explained': self.variance_explained_})
+        if self._perm_done:
+            pvals = self.pvals_
+        else:
+            pvals = float('nan')
+        df['p value'] = pvals
+        return df
     def flip_signs(self, lv_idx=None):
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
