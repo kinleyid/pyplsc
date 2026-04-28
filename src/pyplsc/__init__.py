@@ -435,7 +435,7 @@ class BaseClass():
         confint_level : float, optional
             The confidence level of the quantile-based confidence intervals to compute. The default is 0.95.
         alignment_method : string, optional
-            Method to be used for aligning recomputed data saliences with original data saliences. Must be one of: `'rotate-design-sals'` and `'rotate-data-sals'` use the solution to the orthogonal Proctrustes problem to align the recomputed design or data saliences, respectively, with the originals. `'flip-signs'` flips the signs of the resampled data saliences so that their inner products with original saliences are positive. The default is `'rotate-design-sals'`.
+            Method to be used for aligning recomputed data saliences with original data saliences. Must be one of:
             
             - ``'rotate-design-sals'`` (default): Find the rotation that solves the orthogonal procrustes problem to align the recomputed and original design saliences, then apply this to the recomputed data saliences. This is the what is computed in the original Matlab version of PLS.
             - ``'rotate-data-sals'``: Find the rotation that solves the orthogonal procrustes problem to align the recomputed and original data saliences, then apply this to the recomputed data saliences.
