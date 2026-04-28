@@ -451,7 +451,7 @@ class BaseClass():
 
         Returns
         -------
-        design_resampled : numpy.ndarray
+        :class:`numpy.ndarray`
             If `return_boot_dist` is true, returns the bootstrap distribution of the statistic named by :attr:`boot_stat`
 
         Examples
