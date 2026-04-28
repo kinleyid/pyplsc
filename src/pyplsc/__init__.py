@@ -186,8 +186,11 @@ class BaseClass():
         -------
         :class:`pandas.DataFrame`
             Data frame with one row per latent variable pair.
-        """
         
+        Examples
+        --------
+        >>> mod.summary()
+        """
         df = pd.DataFrame({
             'LV index': range(self.n_sv_),
             'singular value': self.singular_vals_,
