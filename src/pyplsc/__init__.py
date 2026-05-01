@@ -313,7 +313,7 @@ class BaseClass():
         lv_idxs = lv_idx
         lv_subdfs = []
         for lv_idx in lv_idxs:
-            sub_df = self.design_.copy()
+            sub_df = self.get_design_matrix()
             sub_df['lv_idx'] = lv_idx
             sub_df['design_score'] = self.design_scores_[:, lv_idx]
             sub_df['data_score'] = self.transform(lv_idx=lv_idx)
