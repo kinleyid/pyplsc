@@ -70,6 +70,7 @@ def test_bda_basic(fit_bda):
     fit_bda.get_boot_stat_frame()
     fit_bda.get_boot_stat_frame(lv_idx=0)
     fit_bda.get_boot_stat_frame(lv_idx=[0, 1])
+    fit_bda.get_design_matrix()
 
 def test_errors(sample_data):
     data, _, between, within, participant = sample_data
@@ -144,6 +145,7 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.get_boot_stat_frame()
     fit_plsc.get_boot_stat_frame(lv_idx=0)
     fit_plsc.get_boot_stat_frame(lv_idx=[0, 1])
+    fit_plsc.get_design_matrix()
 
 def test_svd_methods(sample_data):
     data, _, between, within, participant = sample_data
