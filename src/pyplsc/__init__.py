@@ -34,6 +34,7 @@ class BaseClass():
         self._fitted = False
         self._reset()
         self._min_unique = min_unique
+        self._has_covarites = False
         # Document inheritable attributes in one place; requires initializing many to None but worth it imo
         # Attributes set by __init__()
         self.svd_method = svd_method #: ``str``: SVD method used
@@ -161,7 +162,7 @@ class BaseClass():
         >>> cond_labels = mod.get_labels(['between', 'within'])
         """
         condition_labels = self.design_[['between', 'within']].drop_duplicates()
-        if isinstance(self, PLSC):
+        if self._has_covarites:
             # Covariates included; create product of conditions and covariates
             index = pd.MultiIndex.from_product(
                 [condition_labels.index, self.covariate_names_],
@@ -264,6 +265,20 @@ class BaseClass():
             sals = sals[:, lv_idx]
         data_scores = data @ sals
         return data_scores
+    def get_design_matrix(self):
+        """
+        Get design matrix, including any covariates, as a dataframe.
+
+        Returns
+        -------
+        pd.DataFrame
+            Design matrix as a dataframe
+        """
+        df = self.design_.copy()
+        if self._has_covarites:
+            for i, cov in enumerate(self.covariate_names_):
+                df[cov] = self.covariates_[:, i]
+        return df
     def get_scores_frame(self, lv_idx=None):
         """
         Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the design matrix (:attr:`design_`).
@@ -632,6 +647,7 @@ class PLSC(BtwnClass):
             raise ValueError('Must be as many covariate rows as data rows')
         self.covariates_ = covariates_array
         self.covariate_names_ = covariate_names
+        self._has_covarites = True
     def _get_design_scores(self):
         # Initialize
         design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
