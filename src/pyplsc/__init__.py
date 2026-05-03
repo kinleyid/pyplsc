@@ -978,12 +978,10 @@ class WPLSC(BaseClass):
             within = [None]*len(data)
         if participant is None:
             participant = ['participant-%s' % n for n in range(len(data))]
-        # Handle case where covariates/within are column names
+        # Handle case where covariates are column names
         # Turn single strings into one-element lists
         if isinstance(covariates, str):
             covariates = [covariates]
-        if isinstance(within, str):
-            within = [within]
         # If str, just replicate for each participant
         if isinstance(covariates[0], str):
             covariates = [covariates]*len(data)
