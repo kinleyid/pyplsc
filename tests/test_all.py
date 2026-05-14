@@ -105,7 +105,8 @@ def test_errors(sample_data):
     for method_name in ['flip_signs', 'transform', 'get_scores_frame', 'permute', 'bootstrap', 'get_boot_stat_frame']:
         with pytest.raises(pyplsc.NotFittedError):
             getattr(mod, method_name)()
-
+    with pytest.raises(pyplsc.BadStrArgError):
+        mod = pyplsc.PLSC(svd_method='custom')
 def test_flips(fit_bda):
     fit_bda.bootstrap(n_boot=2)
     sals_1 = fit_bda.data_sals_[:, 0].copy()
