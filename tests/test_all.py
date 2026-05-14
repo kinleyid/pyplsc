@@ -235,8 +235,16 @@ def test_summary(fit_bda, fit_plsc):
 def test_wplsc_inputs(within_ptpt_sample_data):
     data, covariates, within = within_ptpt_sample_data
     wplsc = pyplsc.WPLSC(random_state=123)
+    # Different data shapes
     with pytest.raises(Exception):
         data2 = [arr.copy() for arr in data]
         data2[0] = data2[0][:-2]
         wplsc.fit(data=data2, covariates=covariates, within=within, weighted=True)
-    return wplsc
+    # No within
+    wplsc.fit(data=data, covariates=covariates, weighted=True)
+    # Incorrect lengths
+    with pytest.raises(Exception):
+        data2 = [arr.copy() for arr in data]
+        wplsc.fit(data=data[:-2], covariates=covariates, within=within, weighted=True)
+    # No weights
+    wplsc.fit(data=data, covariates=covariates, within=within, weighted=False)
