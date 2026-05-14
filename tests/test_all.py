@@ -231,3 +231,12 @@ def test_utils():
 def test_summary(fit_bda, fit_plsc):
     fit_bda.summary()
     fit_plsc.summary()
+
+def test_wplsc_inputs(within_ptpt_sample_data):
+    data, covariates, within = within_ptpt_sample_data
+    wplsc = pyplsc.WPLSC(random_state=123)
+    with pytest.raises(Exception):
+        data2 = [arr.copy() for arr in data]
+        data2[0] = data2[0][:-2]
+        wplsc.fit(data=data2, covariates=covariates, within=within, weighted=True)
+    return wplsc
