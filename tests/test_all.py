@@ -96,12 +96,23 @@ def test_errors(sample_data):
     with pytest.raises(Exception):
         # testing nonexistent effect
         bda.fit(data, within=within, participant=participant, effects={'between'})
+    with pytest.raises(pyplsc.NotFittedError):
+        # Not fitted
+        mod = pyplsc.PLSC()
+        mod.flip_signs()
+    # Not fitted
+    mod = pyplsc.PLSC()
+    for method_name in ['flip_signs', 'transform', 'get_scores_frame', 'permute', 'bootstrap', 'get_boot_stat_frame']:
+        with pytest.raises(pyplsc.NotFittedError):
+            getattr(mod, method_name)()
 
 def test_flips(fit_bda):
     fit_bda.bootstrap(n_boot=2)
     sals_1 = fit_bda.data_sals_[:, 0].copy()
     recon_1 = fit_bda.design_sals_ @ fit_bda.data_sals_.T
+    fit_bda.flip_signs()
     fit_bda.flip_signs(0)
+    fit_bda.flip_signs([0, 1])
     sals_2 = fit_bda.data_sals_[:, 0]
     recon_2 = fit_bda.design_sals_ @ fit_bda.data_sals_.T
     assert np.isclose(sals_1, -sals_2).all()
