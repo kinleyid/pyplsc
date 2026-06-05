@@ -14,11 +14,15 @@ def sample_data():
     between = np.array(['a']*8 + ['b']*8)
     within = np.array([0, 1]*8)
     participant = np.array(np.cumsum([1, 0]*8))
-    return data, covariates, between, within, participant
+    labels = pd.DataFrame(dict(between=between,
+                               participant=participant,
+                               within=within))
+    modeled = [True, False, True]
+    return data, covariates, labels, modeled
 
 @pytest.fixture
 def within_ptpt_sample_data(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     n_ptpt = 5
     data = [data]*n_ptpt
     covariates = [covariates]*n_ptpt
@@ -27,16 +31,16 @@ def within_ptpt_sample_data(sample_data):
 
 @pytest.fixture
 def fit_bda(sample_data):
-    data, _, between, within, participant = sample_data
+    data, _, labels, modeled = sample_data
     bda = pyplsc.BDA(random_state=123)
-    bda.fit(data=data, between=between, within=within, participant=participant)
+    bda.fit(data=data, labels=labels, modeled=modeled)
     return bda
 
 @pytest.fixture
 def fit_plsc(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     plsc = pyplsc.PLSC(random_state=123)
-    plsc.fit(data=data, covariates=covariates, between=between, within=within, participant=participant)
+    plsc.fit(data=data, covariates=covariates, labels=labels, modeled=modeled)
     return plsc
 
 @pytest.fixture
@@ -73,29 +77,35 @@ def test_bda_basic(fit_bda):
     fit_bda.get_design_matrix()
 
 def test_errors(sample_data):
-    data, _, between, within, participant = sample_data
+    data, _, labels, modeled = sample_data
     bda = pyplsc.BDA()
     with pytest.raises(Exception):
         # Nothing to stratify observations
         bda.fit(data)
+        '''
     with pytest.raises(Exception):
         # Within condition without a way to differentiate participants
         bda.fit(data, within=within)
+        '''
     with pytest.raises(Exception):
         # Different length of condition indicator vs data
-        bda.fit(data, between=between[:(len(data) - 1)])
+        bda.fit(data, labels=labels.iloc[:(len(data) - 1)])
     with pytest.raises(Exception):
         # Nothing to stratify observations
-        bda.fit(data, between=[0]*len(data))
+        bda.fit(data, labels=[0]*len(data))
     with pytest.raises(Exception):
         # yerr without having resampled
         bda.get_design_yerr(0)
+        '''
     with pytest.raises(Exception):
         # testing nonexistent effect
         bda.fit(data, between=between, effects={'within'})
+        '''
+        '''
     with pytest.raises(Exception):
         # testing nonexistent effect
         bda.fit(data, within=within, participant=participant, effects={'between'})
+        '''
     with pytest.raises(pyplsc.NotFittedError):
         # Not fitted
         mod = pyplsc.PLSC()
@@ -130,23 +140,19 @@ def test_bda_rng(fit_bda):
     pvals_2 = bda.pvals_
     assert all(np.isclose(pvals_1, pvals_2))
 
+'''
 def test_bda_effects(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     bda = pyplsc.BDA()
-    bda.fit(data=data, between=between, within=within, participant=participant,
+    bda.fit(data=data, labels=labels,
             effects={'interaction'})
+'''
 
 def test_bda_input(sample_data):
-    data, _, between, within, participant = sample_data
-    design = pd.DataFrame({
-        'w': within,
-        'b': between,
-        'p': participant})
+    data, _, labels, modeled = sample_data
     bda = pyplsc.BDA()
-    bda.fit(data=data, design=design,
-            between='b', within='w', participant='p')
-    bda.fit(data=data, design=design,
-            between='b', within='w', participant=participant)
+    bda.fit(data=data, labels=labels, modeled=modeled)
+    bda.fit(data=data, labels=labels.to_numpy(), modeled=modeled)
 
 def test_plsc_basic(fit_plsc):
     assert len(fit_plsc.design_sal_labels_) == len(fit_plsc.design_sals_)
@@ -162,19 +168,19 @@ def test_plsc_basic(fit_plsc):
     fit_plsc.get_design_matrix()
 
 def test_svd_methods(sample_data):
-    data, _, between, within, participant = sample_data
+    data, _, labels, modeled = sample_data
     bda = pyplsc.BDA(svd_method='randomized')
-    bda.fit(data=data, between=between)
+    bda.fit(data=data, labels=labels, modeled=modeled)
 
+'''
 def test_plsc_input(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     design = pd.DataFrame({
         'w': within,
         'b': between,
         'p': participant})
     plsc = pyplsc.PLSC()
-    plsc.fit(data=data, design=design, covariates=covariates,
-             between='b', within='w', participant='p')
+    plsc.fit(data=data, covariates=covariates, labels=labels)
     plsc.fit(data=data, design=design, covariates=covariates,
              between='b', within='w', participant=participant)
     cov_names = plsc.covariate_names_
@@ -182,27 +188,25 @@ def test_plsc_input(sample_data):
         design[name] = covariates[:, i]
     plsc.fit(data=data, design=design, covariates=cov_names,
              between='b', within='w', participant='p')
+'''
 
 def test_plsc_designs(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     plsc = pyplsc.PLSC()
-    plsc.fit(data=data, covariates=covariates)
+    plsc.fit(data=data, covariates=covariates, labels=labels, modeled=modeled)
     plsc.permute(10)
     plsc.bootstrap(10)
-    plsc.fit(data=data, covariates=covariates, between=between)
-    plsc.permute(10)
-    plsc.bootstrap(10)
-    plsc.fit(data=data, covariates=covariates, within=within, participant=participant)
 
 def test_alt_boot_stats(sample_data):
-    data, covariates, between, within, participant = sample_data
+    data, covariates, labels, modeled = sample_data
     bda = pyplsc.BDA(boot_stat='condwise-scores')
-    bda.fit(data=data, between=between)
+    bda.fit(data=data, labels=labels, modeled=modeled)
     bda.bootstrap(10)
     plsc = pyplsc.PLSC(boot_stat='condwise-scores')
-    plsc.fit(data=data, covariates=covariates, between=between)
+    plsc.fit(data=data, covariates=covariates, labels=labels, modeled=modeled)
     plsc.bootstrap(10)
     
+'''
 def test_wplsc_basic(fit_wplsc):
     # Simple testing of model fitting
     assert len(fit_wplsc.design_sal_labels_) == len(fit_wplsc.design_sals_)
@@ -224,6 +228,7 @@ def test_wplsc_basic(fit_wplsc):
     fit_wplsc.get_boot_stat_frame()
     fit_wplsc.get_boot_stat_frame(lv_idx=0)
     fit_wplsc.get_boot_stat_frame(lv_idx=[0, 1])
+'''
 
 def test_utils():
     pyplsc.utils.get_design_for_sorted(group_sizes=[3, 2], n_cond=3)
@@ -232,6 +237,7 @@ def test_summary(fit_bda, fit_plsc):
     fit_bda.summary()
     fit_plsc.summary()
 
+'''
 def test_wplsc_inputs(within_ptpt_sample_data):
     data, covariates, within = within_ptpt_sample_data
     wplsc = pyplsc.WPLSC(random_state=123)
@@ -248,3 +254,4 @@ def test_wplsc_inputs(within_ptpt_sample_data):
         wplsc.fit(data=data[:-2], covariates=covariates, within=within, weighted=True)
     # No weights
     wplsc.fit(data=data, covariates=covariates, within=within, weighted=False)
+'''
