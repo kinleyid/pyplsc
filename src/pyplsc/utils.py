@@ -89,7 +89,7 @@ def stratified_corrs(data, covariates, labels, modeled):
         # Stack such that covariate is represented along first axis
         R_mat = np.concat(R_mat)
     return R_mat
-        
+
 def cluster_permute(labels, permute, rng, return_cov_perm=False):
     permuted_labels = labels.copy()
     n_obs, n_levels = labels.shape
@@ -192,6 +192,3 @@ def cluster_resample(labels, resample, rng):
             labels = labels[resampled_rows]
             obs_id = obs_id[resampled_rows]
     return resampled_rows
-
-def df_to_tuples(df):
-    return list(df.itertuples(index=False))

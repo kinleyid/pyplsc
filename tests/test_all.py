@@ -23,11 +23,15 @@ def sample_data():
 @pytest.fixture
 def within_ptpt_sample_data(sample_data):
     data, covariates, labels, modeled = sample_data
-    n_ptpt = 5
-    data = [data]*n_ptpt
-    covariates = [covariates]*n_ptpt
-    within = [within]*n_ptpt
-    return data, covariates, within
+    n_copies = 20
+    data = np.concat([data]*n_copies)
+    data = np.random.normal(size=data.shape)
+    covariates = np.concat([covariates]*n_copies)
+    covariates = np.random.normal(size=covariates.shape)
+    labels = pd.concat([labels]*n_copies, ignore_index=True)
+    labels['trial'] = np.arange(len(data))
+    modeled.append(False)
+    return data, covariates, labels, modeled
 
 @pytest.fixture
 def fit_bda(sample_data):
@@ -45,9 +49,9 @@ def fit_plsc(sample_data):
 
 @pytest.fixture
 def fit_wplsc(within_ptpt_sample_data):
-    data, covariates, within = within_ptpt_sample_data
-    wplsc = pyplsc.WPLSC(random_state=123)
-    wplsc.fit(data=data, covariates=covariates, within=within, weighted=True)
+    data, covariates, labels, modeled = within_ptpt_sample_data
+    wplsc = pyplsc.PLSC(random_state=123)
+    wplsc.fit(data=data, covariates=covariates, labels=labels, modeled=modeled)
     return wplsc
 
 def test_bda_basic(fit_bda):
@@ -205,8 +209,7 @@ def test_alt_boot_stats(sample_data):
     plsc = pyplsc.PLSC(boot_stat='condwise-scores')
     plsc.fit(data=data, covariates=covariates, labels=labels, modeled=modeled)
     plsc.bootstrap(10)
-    
-'''
+
 def test_wplsc_basic(fit_wplsc):
     # Simple testing of model fitting
     assert len(fit_wplsc.design_sal_labels_) == len(fit_wplsc.design_sals_)
@@ -228,7 +231,6 @@ def test_wplsc_basic(fit_wplsc):
     fit_wplsc.get_boot_stat_frame()
     fit_wplsc.get_boot_stat_frame(lv_idx=0)
     fit_wplsc.get_boot_stat_frame(lv_idx=[0, 1])
-'''
 
 def test_utils():
     pyplsc.utils.get_design_for_sorted(group_sizes=[3, 2], n_cond=3)
