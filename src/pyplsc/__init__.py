@@ -335,12 +335,6 @@ class BaseClass():
             return null_dist
     def _get_permutations(self, n_perm, silent):
         rng = np.random.default_rng(self.random_state)
-        '''
-        perms = [
-            rng.permutation(len(self.data_))
-            for perm_n in tqdm(range(n_perm), desc='Getting permutations', disable=silent)
-        ]
-        '''
         perms = [
             utils.cluster_permute(self.label_mat_,
                                   self.modeled_,
