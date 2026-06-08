@@ -78,13 +78,13 @@ class BaseClass():
         if not valid_data:
             raise ValueError('data must be a 1- or 2-dimensional numpy array')
         self.data_ = data
-    def _setup_labels(self, labels, label_names=None):
+    def _setup_labels(self, labels):
         # Convert to dataframe
         if isinstance(labels, np.ndarray):
             labels = pd.DataFrame(labels)
             labels.columns = ['label_%s' % i for i in range(len(labels.columns))]
         elif not isinstance(labels, pd.DataFrame):
-            raise ValueError('Design matrix must be pandas DataFrame or numpy array')
+            raise ValueError('Data labels must be pandas DataFrame or numpy array')
         # Convert columns to categorical
         for col in labels.columns:
             labels[col] = pd.Categorical(labels[col])
@@ -248,7 +248,7 @@ class BaseClass():
         return df
     def get_scores_frame(self, lv_idx=None):
         """
-        Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the design matrix (:attr:`design_`).
+        Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the data labels.
 
         Parameters
         ----------
@@ -535,7 +535,7 @@ class BaseClass():
 
 class PLSC(BaseClass):
     """
-    Within-participants PLSC (`Roberts et al., 2016 <https://doi.org/10.1016/j.neuroimage.2016.04.028>`_). Used for analyzing within-partcipants correlations. Cross-correlation matrices are computed within participants, averaged, and submitted to singular value decomposition.
+    Class for PLSC models, based on singular value decomposition of cross-correlation matrices stacked by condition.
     
     Parameters
     ----------
@@ -554,7 +554,7 @@ class PLSC(BaseClass):
     """
     _min_unique = 2 # For resampling
     _has_covariates = True
-    def _setup_covariates(self, covariates, covariate_names=None):
+    def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
             self.covariates_ = covariates.to_numpy()
@@ -567,10 +567,6 @@ class PLSC(BaseClass):
             self.covariate_names_ = ['cov_%s' % i for i in range(n_cov)]
         else:
             raise ValueError('Covariates must be a pandas DataFrame or a numpy array')
-        if covariate_names is not None:
-            if len(covariate_names) != len(self.covariate_names_):
-                raise ValueError('Must be as many covariate names as covariates')
-            self.covariate_names_ = covariate_names
         # Convert covariate names to array
         self.covariate_names_ = np.array(self.covariate_names_)
     def _get_design_scores(self):
@@ -593,24 +589,19 @@ class PLSC(BaseClass):
             # Multiply them to get the current design scores
             design_scores[obs_mask] = obs_submat @ sal_submat
         return design_scores
-    def fit(self, data, covariates, labels, modeled, label_names=None, covariate_names=None):
+    def fit(self, data, covariates, labels, modeled):
         """
-        Fit a within-participants PLSC model.
+        Fit a PLSC model.
 
         Parameters
         ----------
-        data : list
-            List of participant-specific data arrays. Each should be a ``numpy.ndarray`` of shape (n. trials, n. observed vars).
-        covariates : list or str
-            List of participant-specific covariates (in which case each list element must be a valid ``covariates`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the covariates.
-        design : list, optional
-            List of participant-specific design matrices. Each list element must be a valid ``design`` argument to :class:`PLSC.fit`. The default is ``None``.
-        within : list or str, optional
-            List of participant-specific indicators of within-participant condition (in which case each list element must be a valid ``between`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the within-participant condition indicators.
-        participant : list, optional
-            A list of participant identifiers (integers or strings).
-        weighted : bool, optional
-            Specifies whether participant-level cross-covariance matrices should weighted by number of trials when averaged together. Default is False.
+        data : numpy.ndarray
+            Data array of shape (n. observations, n. features).
+        covariates : numpy.ndarray | pd.DataFrame
+            Covariate array or dataframe of shape (n. observations, n. covariates).
+        labels : numpy.ndarray | pd.DataFrame
+            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
+        modeled : 
 
         Returns
         -------
@@ -629,8 +620,8 @@ class PLSC(BaseClass):
         """
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
-        self._setup_labels(labels, label_names)
-        self._setup_covariates(covariates, covariate_names)
+        self._setup_labels(labels)
+        self._setup_covariates(covariates)
         self.modeled_ = np.array(modeled)
         self.resample_ = ~self.modeled_ # TODO: set as needed
         R = utils.stratified_corrs(self.data_,
@@ -714,16 +705,16 @@ class BDA(BaseClass):
             idx = design_sal_labels.index(obs_label)
             design_scores.append(self.design_sals_[idx])
         return np.stack(design_scores)
-    def fit(self, data, labels, modeled, label_names=None, covariate_names=None):
+    def fit(self, data, labels, modeled):
         """
-        Fit a within-participants PLSC model.
+        Fit a PLSC model.
 
         Parameters
         ----------
-        data : list
-            List of participant-specific data arrays. Each should be a ``numpy.ndarray`` of shape (n. trials, n. observed vars).
-        covariates : list or str
-            List of participant-specific covariates (in which case each list element must be a valid ``covariates`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the covariates.
+        data : numpy.ndarray
+            Data array of shape (n. observations, n. features).
+        covariates : numpy.ndarray | pd.DataFrame
+            Data array or data frame of shape (n. observations, n. covariates).
         design : list, optional
             List of participant-specific design matrices. Each list element must be a valid ``design`` argument to :class:`PLSC.fit`. The default is ``None``.
         within : list or str, optional
@@ -750,7 +741,7 @@ class BDA(BaseClass):
         """
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
-        self._setup_labels(labels, label_names)
+        self._setup_labels(labels)
         self.modeled_ = np.array(modeled)
         self.resample_ = ~self.modeled_ # TODO: set as needed
         M = utils.stratified_average(self.data_,
