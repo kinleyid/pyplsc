@@ -93,102 +93,116 @@ def stratified_corrs(data, covariates, labels, modeled):
 def cluster_permute(labels, permute, rng, return_cov_perm=False):
     permuted_labels = labels.copy()
     n_obs, n_levels = labels.shape
-    # Permute 0th level? Special case because 0th level can never be clustered
+
+    # Vectorized row comparisons
+    def rows_equal(arr, row):
+        return np.all(arr == row, axis=1)
+
+    # Permute values within groups
+    def permute_level_within_groups(parent_cols, level_col, child_col=None):
+        """
+        For every unique combination in parent_cols, shuffle the label in
+        level_col (and, when child_col is provided, track its grouping too).
+        Returns updated level_col.
+        """
+        result = level_col.copy()
+        unique_parents, parent_inv = np.unique(parent_cols, axis=0, return_inverse=True)
+        for idx in range(len(unique_parents)):
+            mask = parent_inv == idx
+            if child_col is None:
+                # Lowest level of labels: shuffle individual observations
+                result[mask] = rng.permutation(level_col[mask])
+            else:
+                # Shuffle child-cluster labels
+                sub = np.stack([level_col[mask], child_col[mask]], axis=1)
+                unique_sub, sub_inv = np.unique(sub, axis=0, return_inverse=True)
+                unique_vals = unique_sub[:, 0]
+                perm = rng.permutation(len(unique_vals))
+                result[mask] = unique_vals[perm][sub_inv]
+        return result
+
+    # Level 0 (special case, cannot have a parent level)
     if permute[0]:
         if n_levels == 1:
-            # Labels at 0th level apply to individual observations
             depth = 1
         else:
-            # Labels at 0th level apply to the clusters at the next level down
-            depth = 2
-        clusters = pd.MultiIndex.from_arrays(labels[:, :depth].T)
-        unique_clusters = clusters.unique()
-        # Shuffle the labels
+            depth = 2 # Labels at this level apply to a child level
+        clusters = labels[:, :depth]
+        unique_clusters, inv = np.unique(clusters, axis=0, return_inverse=True)
         perm = rng.permutation(len(unique_clusters))
-        permuted_level_labels = unique_clusters.get_level_values(0)[perm]
-        # Expand labels
-        mapping = dict(zip(unique_clusters, permuted_level_labels))
-        permuted_level_labels = np.array([mapping[c] for c in clusters])
-        permuted_labels[:, 0] = permuted_level_labels
+        permuted_labels[:, 0] = unique_clusters[perm, 0][inv]   # vectorized remap
+
+    # Remaining levels, if any
     if n_levels > 1:
-        for parent_level in range(n_levels - 1):
-            level = parent_level + 1
+        for level in range(1, n_levels):
             if permute[level]:
-                parent_clusters = pd.MultiIndex.from_arrays(labels[:, :level].T)
-                unique_parent_clusters = parent_clusters.unique()
-                child_level = level + 1
-                # Stratify permutations to be within the parent clusters
-                for parent_cluster in unique_parent_clusters:
-                    in_parent = parent_clusters == parent_cluster
-                    if child_level == n_levels:
-                        # No child---we're permuting the lowest-level observation labels
-                        perm = rng.permutation(in_parent.sum())
-                        permuted_labels[in_parent, level] = permuted_labels[in_parent, level][perm]
-                    else:
-                        # Permute labels at child level within clusters at current level
-                        child_clusters = pd.MultiIndex.from_arrays(labels[in_parent, level:(child_level+1)].T)
-                        unique_child_clusters = child_clusters.unique()
-                        unique_level_labels = unique_child_clusters.get_level_values(0)
-                        perm = rng.permutation(len(unique_level_labels))
-                        permuted_level_labels = unique_level_labels[perm]
-                        mapping = dict(zip(unique_child_clusters, permuted_level_labels))
-                        permuted_level_labels = np.array([mapping[c] for c in child_clusters])
-                        permuted_labels[in_parent, level] = permuted_level_labels
+                parent_cols = labels[:, :level] # Observations are not just stratified by the immediate parent level but by all "ancestor" levels (in case of, e.g., repeated condition labels within some higher level of labels)
+                # Is there a child level?
+                if (level + 1) < n_levels:
+                    child_col = labels[:, level + 1]
+                else:
+                    child_col = None
+                permuted_labels[:, level] = permute_level_within_groups(
+                    parent_cols, labels[:, level], child_col
+                )
+
+    # Permute covariates?
     out = (permuted_labels,)
     if return_cov_perm:
         cov_perm = np.arange(n_obs)
         if n_levels == 1:
-            # Don't cluster
-            perm = rng.permutation(n_obs)
-            cov_perm = cov_perm[perm]
+            # No stratification, just shuffle
+            cov_perm = rng.permutation(n_obs)
         else:
-            # Cluster by second-lowest level
+            # Shuffle within clusters
             level = n_levels - 1
-            parent_clusters = pd.MultiIndex.from_arrays(labels[:, :level].T)
-            unique_parent_clusters = parent_clusters.unique()
-            # Stratify permutations within the parent clusters
-            for parent_cluster in unique_parent_clusters:
-                in_parent = parent_clusters == parent_cluster
-                perm = rng.permutation(in_parent.sum())
-                cov_perm[in_parent] = cov_perm[in_parent][perm]
+            parent_cols = labels[:, :level]
+            _, parent_inv = np.unique(parent_cols, axis=0, return_inverse=True)
+            for idx in range(parent_inv.max() + 1):
+                mask = parent_inv == idx
+                cov_perm[mask] = cov_perm[mask][rng.permutation(mask.sum())]
         out += (cov_perm,)
+
     return out
 
 def cluster_resample(labels, resample, rng):
     labels = labels.copy()
     n_obs, n_levels = labels.shape
-    obs_id = np.arange(n_obs)
-    # Resample 0th level? Special case because 0th level can never be clustered
+    obs_id = np.arange(n_obs) # Identifiers for individual observations
+
+    # Level 0 (special case: not clustered within any parent level)
     if resample[0]:
-        # Get unique vals at 0th level
-        level_0 = labels[:, 0]
-        unique_vals = np.unique(level_0)
-        # Resample them
-        resampled_vals = rng.choice(unique_vals, len(unique_vals))
-        # Map from values to rows
-        mapping = {val: np.where(level_0 == val)[0] for val in unique_vals}
-        resampled_rows = np.concat([mapping[val] for val in resampled_vals])
+        unique_vals, inv = np.unique(labels[:, 0], return_inverse=True)
+        resampled_val_ids = rng.choice(len(unique_vals), len(unique_vals))   # indices
+        # For each resampled value, grab all rows that carry it
+        resampled_rows = np.concatenate([np.where(inv == val_id)[0] for val_id in resampled_val_ids])
         labels = labels[resampled_rows]
         obs_id = obs_id[resampled_rows]
-    for level in range(n_levels - 1):
-        if resample[level + 1]:
-            # curr_labels = labels[:, level]
-            curr_clusters = pd.MultiIndex.from_arrays(labels[:, :(level + 1)].T)
-            # Stratify children by current level
-            # unique_labels = np.unique(curr_labels)
-            unique_clusters = curr_clusters.unique()
-            child_level = level + 1
+
+    # Remaining levels
+    for level in range(1, n_levels):
+        if resample[level]:
+            parent_cols = labels[:, :level]
+            child_col = labels[:, level]
+    
+            # Integer parent-cluster id per row
+            unique_parents, parent_inv = np.unique(parent_cols, axis=0, return_inverse=True)
+    
             resampled_rows = []
-            for unique_cluster in unique_clusters:
-                # Get unique "children" to resample
-                children = labels[curr_clusters == unique_cluster, child_level]
-                unique_children = np.unique(children)
-                # Resample them
-                resampled_children = rng.choice(unique_children, len(unique_children))
-                # Map from child to rows
-                mapping = {child: np.where(labels[:, child_level] == child)[0] for child in unique_children}
-                resampled_rows += [mapping[child] for child in resampled_children]
-            resampled_rows = np.concat(resampled_rows)
-            labels = labels[resampled_rows]
-            obs_id = obs_id[resampled_rows]
-    return resampled_rows
+            for p_idx in range(len(unique_parents)):
+                parent_mask  = parent_inv == p_idx # rows in this parent
+                child_vals = child_col[parent_mask]
+                unique_children, child_inv = np.unique(child_vals, return_inverse=True)
+    
+                # Resample child cluster indices (with replacement)
+                resampled_child_idx = rng.choice(len(unique_children), len(unique_children))
+    
+                # Collect rows for each resampled child, scoped to this parent
+                parent_positions = np.where(parent_mask)[0] # absolute row indices
+                for c_idx in resampled_child_idx:
+                    resampled_rows.append(parent_positions[child_inv == c_idx])
+    
+            labels = labels[np.concatenate(resampled_rows)]
+            obs_id = obs_id[np.concatenate(resampled_rows)]
+
+    return obs_id
