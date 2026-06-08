@@ -601,22 +601,32 @@ class PLSC(BaseClass):
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        modeled : 
+        modeled : numpy.ndarray | list
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
 
         Returns
         -------
-        None
+        self : :class:`PLSC`
+            PLSC model fit to the data provided.
         
         Examples
         --------
         >>> # Simulate null data
         >>> n_var = 10
         >>> ptptwise_n_trials = [10, 10, 9, 8, 12]
-        >>> data = [np.random.normal(size=(n_trials, n_var)) for n_trials in ptptwise_n_trials]
-        >>> covs = [np.random.normal(size=(n_trials, 1)) for n_trials in ptptwise_n_trials] 
+        >>> ptptwise_conds = ['a', 'a', 'b', 'b', 'b']
+        >>> data = np.concat([np.random.normal(size=(n_trials, n_var)) for n_trials in ptptwise_n_trials])
+        >>> covs = np.concat([np.random.normal(size=(n_trials, 1)) for n_trials in ptptwise_n_trials])
+        >>> # Generate labels for between-participants condition, participant IDs, and arbitrary trial indices
+        >>> cond_labels = np.concat([cond]*n_trials for cond, n_trials in zip(ptptwise_conds, ptptwise_n_trials)])
+        >>> ptpt_ids = np.concat([ptpt_id]*n_trials for ptpt_id, n_trials in enumerate(ptptwise_n_trials)])
+        >>> trial_labels = np.arange(np.sum(ptptwise_n_trials))
+        >>> labels = pd.DataFrame({'cond': cond_labels, 'ptpt': ptpt_ids, 'trial': trial_labels})
+        >>> # Stratify only by condition, not by participant or trial
+        >>> modeled = [True, False, False]
         >>> # Fit model
-        >>> mod = pyplsc.WPLSC()
-        >>> mod.fit(data=data, covariates=covs, weighted=True)
+        >>> mod = pyplsc.PLSC()
+        >>> mod.fit(data=data, covariates=covs, modeled=modeled)
         """
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
@@ -643,6 +653,7 @@ class PLSC(BaseClass):
             self.boot_stat_val_ = utils.stratified_average(scores,
                                                            self.label_mat_,
                                                            self.modeled_)
+        return self
     def _single_permutation(self, permuted_labels, cov_perm):
         R = utils.stratified_corrs(self.data_,
                                    self.covariates_[cov_perm],
@@ -707,26 +718,23 @@ class BDA(BaseClass):
         return np.stack(design_scores)
     def fit(self, data, labels, modeled):
         """
-        Fit a PLSC model.
+        Fit a BDA model.
 
         Parameters
         ----------
         data : numpy.ndarray
             Data array of shape (n. observations, n. features).
         covariates : numpy.ndarray | pd.DataFrame
-            Data array or data frame of shape (n. observations, n. covariates).
-        design : list, optional
-            List of participant-specific design matrices. Each list element must be a valid ``design`` argument to :class:`PLSC.fit`. The default is ``None``.
-        within : list or str, optional
-            List of participant-specific indicators of within-participant condition (in which case each list element must be a valid ``between`` argument to :class:`PLSC.fit`), or the names of the columns in ``design`` that contain the within-participant condition indicators.
-        participant : list, optional
-            A list of participant identifiers (integers or strings).
-        weighted : bool, optional
-            Specifies whether participant-level cross-covariance matrices should weighted by number of trials when averaged together. Default is False.
+            Covariate array or dataframe of shape (n. observations, n. covariates).
+        labels : numpy.ndarray | pd.DataFrame
+            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
+        modeled : numpy.ndarray | list
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
 
         Returns
         -------
-        None
+        self : :class:`PLSC`
+            PLSC model fit to the data provided.
         
         Examples
         --------
@@ -762,6 +770,7 @@ class BDA(BaseClass):
             self.boot_stat_val_ = self._mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
+        return self
     def _single_permutation(self, permuted_labels):
         R = utils.stratified_average(self.data_,
                                      permuted_labels,
