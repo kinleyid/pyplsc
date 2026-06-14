@@ -205,32 +205,35 @@ class BaseClass():
         data_scores = data @ sals
         return data_scores
     def _get_design_sal_labels(self):
-        # Stratify the same way as when computing the matrix to factorize
-        modeled_labels = self.label_frame_.iloc[:, self.modeled_]
-        stratifier = pd.MultiIndex.from_arrays(self.label_mat_[:, self.modeled_].T)
-        label_sets = stratifier.unique()
-        rows = []
-        for label_set in label_sets:
-            # Create row
-            row = []
-            for col_idx, cat_idx in enumerate(label_set):
-                cat = modeled_labels.iloc[:, col_idx].cat.categories[cat_idx]
-                row.append(cat)
-            if self._has_covariates:
-                # Add extra column for covariate
-                row.append(None) # Placeholder
-                for cov_name in self.covariate_names_:
-                    row = row.copy()
-                    row[-1] = cov_name
+        if any(self.modeled_):
+            # Stratify the same way as when computing the matrix to factorize
+            modeled_labels = self.label_frame_.iloc[:, self.modeled_]
+            stratifier = pd.MultiIndex.from_arrays(self.label_mat_[:, self.modeled_].T)
+            label_sets = stratifier.unique()
+            rows = []
+            for label_set in label_sets:
+                # Create row
+                row = []
+                for col_idx, cat_idx in enumerate(label_set):
+                    cat = modeled_labels.iloc[:, col_idx].cat.categories[cat_idx]
+                    row.append(cat)
+                if self._has_covariates:
+                    # Add extra column for covariate
+                    row.append(None) # Placeholder
+                    for cov_name in self.covariate_names_:
+                        row = row.copy()
+                        row[-1] = cov_name
+                        rows.append(row)
+                else:
                     rows.append(row)
-            else:
-                rows.append(row)
-        df = pd.DataFrame(rows)
-        colnames = self.label_frame_.columns[self.modeled_]
-        if self._has_covariates:
-            colnames = colnames.to_list()
-            colnames.append('covariate')
-        df.columns = colnames
+            df = pd.DataFrame(rows)
+            colnames = self.label_frame_.columns[self.modeled_]
+            if self._has_covariates:
+                colnames = colnames.to_list()
+                colnames.append('covariate')
+            df.columns = colnames
+        else:
+            df = pd.DataFrame({'covariate': self.covariate_names_})
         return df
     def get_design_matrix(self):
         """
@@ -319,10 +322,9 @@ class BaseClass():
             raise ValueError('n_perm must be a positive integer')
         silent = not print_prog
         # Pre-generate perm_idx
-        perms = self._get_permutations(n_perm, silent)
+        perms = self._get_permutations(n_perm, n_jobs, silent)
         perm_singvals = Parallel(n_jobs=n_jobs)(
             delayed(self._single_permutation)(*perm)
-            # delayed(self._single_permutation)(perm)
             for perm in tqdm(perms, desc='Permuting', disable=silent)
         )
         null_dist = np.stack(perm_singvals)
@@ -333,8 +335,26 @@ class BaseClass():
         self._perm_done = True
         if return_null_dist:
             return null_dist
-    def _get_permutations(self, n_perm, silent):
+    def _get_permutations(self, n_perm, n_jobs, silent):
+        ss = np.random.SeedSequence(self.random_state)
+        child_sequences = ss.spawn(n_perm)
+        perms = Parallel(n_jobs=n_jobs)(
+            delayed(utils.cluster_permute)(self.label_mat_,
+                                           self.permute_,
+                                           np.random.default_rng(child_seq),
+                                           return_cov_perm=self._has_covariates)
+            for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
+        )
+        '''
         rng = np.random.default_rng(self.random_state)
+        seeds = rng.integers(0, 2**31, size=n_perm)
+        perms = Parallel(n_jobs=n_jobs)(
+            delayed(utils.cluster_permute)(self.label_mat_,
+                                           self.modeled_,
+                                           rng,
+                                           return_cov_perm=self._has_covariates)
+            for _ in tqdm(perms, desc='Getting permutations', disable=silent)
+        )
         perms = [
             utils.cluster_permute(self.label_mat_,
                                   self.modeled_,
@@ -342,6 +362,7 @@ class BaseClass():
                                   return_cov_perm=self._has_covariates)
             for perm_n in tqdm(range(n_perm), desc='Getting permutations', disable=silent)
         ]
+        '''
         return perms
     def bootstrap(self, n_boot=5000, confint_level=0.95, alignment_method='rotate-design-sals', return_boot_stat_dist=True, n_jobs=1, print_prog=True):
         """
@@ -634,6 +655,7 @@ class PLSC(BaseClass):
         self._setup_covariates(covariates)
         self.modeled_ = np.array(modeled)
         self.resample_ = ~self.modeled_ # TODO: set as needed
+        self.permute_ = self.modeled_ # TODO: set as needed
         R = utils.stratified_corrs(self.data_,
                                    self.covariates_,
                                    self.label_mat_,
@@ -641,7 +663,7 @@ class PLSC(BaseClass):
         self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
-        self.design_scores_ = self._get_design_scores() # TODO: implement
+        # self.design_scores_ = self._get_design_scores() # TODO: implement
         # Compute boot stat
         scores = self.transform()
         if self.boot_stat == 'score-covariate-corr':
@@ -772,10 +794,11 @@ class BDA(BaseClass):
             self.boot_stat_val_ = SM
         return self
     def _single_permutation(self, permuted_labels):
-        R = utils.stratified_average(self.data_,
+        M = utils.stratified_average(self.data_,
                                      permuted_labels,
                                      self.modeled_)
-        s = self._svd(R, compute_uv=False)
+        M = self._mean_center(M)
+        s = self._svd(M, compute_uv=False)
         return s
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average

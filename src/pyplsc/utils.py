@@ -42,16 +42,17 @@ def stratified_average(data, labels, modeled):
             # Stratify by all but the level at which averages are taken
             stratify = np.array([True]*len(modeled))
             stratify[avg_level] = False
-            label_mi = pd.MultiIndex.from_arrays(labels[:, stratify].T)
-            label_sets = label_mi.unique()
+            
+            unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)
             Ms = []
-            for label_set in label_sets:
-                idx = label_mi == label_set
-                M = data[idx].mean(axis=0)
+            for label_id in range(len(unique_labels)):
+                mask = label_ids == label_id
+                M = data[mask].mean(axis=0)
                 Ms.append(M)
+            
             data = np.stack(Ms)
             # Create new, smaller labels matrix and modeled indicator
-            labels = np.stack(label_sets)
+            labels = np.stack(unique_labels)
             modeled = modeled[stratify]
     return data
 
@@ -68,26 +69,29 @@ def stratified_corrs(data, covariates, labels, modeled):
     if n_levels == 1:
         R_mat = corr(covariates, data)
     else:
-        label_mi = pd.MultiIndex.from_arrays(labels[:, stratify].T)
-        label_sets = label_mi.unique()
+        unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)        
         Rs = []
-        for label_set in label_sets:
-            idx = label_mi == label_set
-            R = corr(covariates[idx], data[idx])
+        for label_id in range(len(unique_labels)):
+            mask = label_ids == label_id
+            R = corr(covariates[mask], data[mask])
             Rs.append(R)
+            
         R_mat = np.stack(Rs)
         # Update labels matrix to reflect the fact that the covariate level is no longer present
         modeled = modeled[stratify]
         if any(~modeled):
-            labels = np.stack(label_sets)
+            labels = np.stack(unique_labels)
             # First z-transform for averaging correlations
             z_mat = np.arctanh(R_mat)
             # Average within higher unmodeled levels
             z_mat = stratified_average(z_mat, labels, modeled)
             # Back-transform to R
             R_mat = np.tanh(z_mat)
+            # R_mat = z_mat
         # Stack such that covariate is represented along first axis
         R_mat = np.concat(R_mat)
+    # R_mat = np.abs(R_mat).mean(axis=0, keepdims=True)
+    # R_mat = R_mat - R_mat.mean()
     return R_mat
 
 def cluster_permute(labels, permute, rng, return_cov_perm=False):
