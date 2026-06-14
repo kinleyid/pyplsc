@@ -97,6 +97,10 @@ class BaseClass():
         clusters = pd.MultiIndex.from_arrays(self.label_mat_.T)
         if len(clusters.unique()) < len(labels):
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
+    def _setup_stratification(self, modeled):
+        self.modeled_ = np.array(modeled)
+        self.resample_ = ~self.modeled_ # TODO: set as needed
+        self.permute_ = self.modeled_
     def _svd(self, M, compute_uv=True):
         # Single function to perform svd using the specified method
         if self.svd_method == 'lapack':
@@ -653,9 +657,7 @@ class PLSC(BaseClass):
         self._setup_data(data)
         self._setup_labels(labels)
         self._setup_covariates(covariates)
-        self.modeled_ = np.array(modeled)
-        self.resample_ = ~self.modeled_ # TODO: set as needed
-        self.permute_ = self.modeled_ # TODO: set as needed
+        self._setup_stratification(modeled)
         R = utils.stratified_corrs(self.data_,
                                    self.covariates_,
                                    self.label_mat_,
@@ -663,7 +665,7 @@ class PLSC(BaseClass):
         self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
-        # self.design_scores_ = self._get_design_scores() # TODO: implement
+        self.design_scores_ = self._get_design_scores() # TODO: implement
         # Compute boot stat
         scores = self.transform()
         if self.boot_stat == 'score-covariate-corr':
@@ -772,8 +774,7 @@ class BDA(BaseClass):
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
         self._setup_labels(labels)
-        self.modeled_ = np.array(modeled)
-        self.resample_ = ~self.modeled_ # TODO: set as needed
+        self._setup_stratification(modeled)
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
                                      self.modeled_)
