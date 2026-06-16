@@ -98,6 +98,7 @@ class BaseClass():
         if len(clusters.unique()) < len(labels):
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, modeled):
+        # Set up attributes that determine how data will be stratified
         self.modeled_ = np.array(modeled)
         self.resample_ = ~self.modeled_ # TODO: set as needed
         self.permute_ = self.modeled_
@@ -590,6 +591,9 @@ class PLSC(BaseClass):
             n_cov = covariates.shape[1]
             self.covariates_ = covariates
             self.covariate_names_ = ['cov_%s' % i for i in range(n_cov)]
+        elif isinstance(covariates, pd.Series):
+            self.covariate_names_ = [covariates.name]
+            self.covariates_ = covariates.to_numpy().reshape((-1, 1))
         else:
             raise ValueError('Covariates must be a pandas DataFrame or a numpy array')
         # Convert covariate names to array
