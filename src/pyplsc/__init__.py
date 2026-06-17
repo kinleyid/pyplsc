@@ -662,10 +662,10 @@ class PLSC(BaseClass):
         self._setup_labels(labels)
         self._setup_covariates(covariates)
         self._setup_stratification(modeled)
-        R = utils.stratified_corrs(self.data_,
-                                   self.covariates_,
-                                   self.label_mat_,
-                                   self.modeled_)
+        R = utils.stratified_corrs(data=self.data_,
+                                   covariates=self.covariates_,
+                                   labels=self.label_mat_,
+                                   modeled=self.modeled_)
         self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
@@ -683,10 +683,11 @@ class PLSC(BaseClass):
                                                            self.modeled_)
         return self
     def _single_permutation(self, permuted_labels, cov_perm):
-        R = utils.stratified_corrs(self.data_,
-                                   self.covariates_[cov_perm],
-                                   permuted_labels,
-                                   self.modeled_)
+        R = utils.stratified_corrs(data=self.data_,
+                                   covariates=self.covariates_[cov_perm],
+                                   # labels=permuted_labels,
+                                   labels=self.label_mat_,
+                                   modeled=self.modeled_)
         s = self._svd(R, compute_uv=False)
         return s
     def _single_resample(self, resample, alignment_method):
