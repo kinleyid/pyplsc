@@ -581,6 +581,7 @@ class PLSC(BaseClass):
     """
     _min_unique = 2 # For resampling
     _has_covariates = True
+    baseline_ = None
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
