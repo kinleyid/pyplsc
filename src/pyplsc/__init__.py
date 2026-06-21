@@ -347,7 +347,8 @@ class BaseClass():
             delayed(utils.cluster_permute)(self.label_mat_,
                                            self.permute_,
                                            np.random.default_rng(child_seq),
-                                           return_cov_perm=self._has_covariates)
+                                           return_cov_perm=self._has_covariates,
+                                           return_flips=self.baseline_ is not None)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -745,7 +746,7 @@ class BDA(BaseClass):
             idx = design_sal_labels.index(obs_label)
             design_scores.append(self.design_sals_[idx])
         return np.stack(design_scores)
-    def fit(self, data, labels, modeled):
+    def fit(self, data, labels, modeled, baseline=None):
         """
         Fit a BDA model.
 
@@ -780,14 +781,15 @@ class BDA(BaseClass):
         self._setup_data(data)
         self._setup_labels(labels)
         self._setup_stratification(modeled)
+        self.baseline_ = baseline
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
-                                     self.modeled_)
+                                     self.modeled_,
+                                     self.baseline_)
         M = self._mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
         self._initial_decomposition(M)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
-        # self.design_scores_ = None # TODO: implement
         self.design_scores_ = self._get_design_scores()
         # Compute boot stat
         scores = self.transform()
@@ -799,10 +801,24 @@ class BDA(BaseClass):
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
         return self
-    def _single_permutation(self, permuted_labels):
-        M = utils.stratified_average(self.data_,
+    def _single_permutation(self, permuted_labels, flips=None):
+        if self.baseline_ is None:
+            # Skip copying to save time
+            data = self.data_
+        else:
+            # Need to copy so as not to alter original data
+            data = self.data_.copy()
+            if self.baseline_ == 'add':
+                # Additive baseline---flip signs
+                data[flips] *= -1
+            elif self.baseline_ == 'div':
+                # Divisive baseline---invert
+                data[flips] **= -1
+                
+        M = utils.stratified_average(data,
                                      permuted_labels,
-                                     self.modeled_)
+                                     self.modeled_,
+                                     self.baseline_)
         M = self._mean_center(M)
         s = self._svd(M, compute_uv=False)
         return s

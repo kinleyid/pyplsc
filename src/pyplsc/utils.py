@@ -29,7 +29,7 @@ def corr(cov, data):
     cov_z = (cov - cov.mean(axis=0)) / cov.std(axis=0, ddof=1)
     return (cov_z.T @ data_z) / (len(data_z) - 1)
 
-def stratified_average(data, labels, modeled):
+def stratified_average(data, labels, modeled, baseline=None):
     while any(~modeled):
         if len(modeled) == 1:
             # No more hierarchical structure
@@ -54,6 +54,13 @@ def stratified_average(data, labels, modeled):
             # Create new, smaller labels matrix and modeled indicator
             labels = np.stack(unique_labels)
             modeled = modeled[stratify]
+    if baseline is not None:
+        if baseline == 'add':
+            baseline_val = 0
+        elif baseline == 'div':
+            baseline_val = 1
+        baseline_row = baseline_val*np.ones_like(data[[0]])
+        data = np.concat((data, baseline_row))
     return data
 
 def stratified_corrs(data, covariates, labels, modeled):
@@ -94,7 +101,7 @@ def stratified_corrs(data, covariates, labels, modeled):
     # R_mat = R_mat - R_mat.mean()
     return R_mat
 
-def cluster_permute(labels, permute, rng, return_cov_perm=False):
+def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=False):
     permuted_labels = labels.copy()
     n_obs, n_levels = labels.shape
 
@@ -166,6 +173,11 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False):
                 mask = parent_inv == idx
                 cov_perm[mask] = cov_perm[mask][rng.permutation(mask.sum())]
         out += (cov_perm,)
+    
+    # Flip to model baseline?
+    if return_flips:
+        flips = rng.random(len(permuted_labels)) < 0.5
+        out += (flips,)
 
     return out
 
