@@ -58,6 +58,7 @@ def stratified_average(data, labels, modeled, baseline=None):
             # Create new, smaller labels matrix and modeled indicator
             labels = np.stack(unique_labels)
             modeled = modeled[stratify]
+    '''
     if baseline is not None:
         if baseline == 'add':
             baseline_val = 0
@@ -66,6 +67,7 @@ def stratified_average(data, labels, modeled, baseline=None):
         baseline_row = baseline_val*np.ones_like(data[[0]])
         # baseline_row = baseline_val*np.ones_like(data)
         data = np.concat((data, baseline_row))
+    '''
     return data
 
 def stratified_corrs(data, covariates, labels, modeled):
