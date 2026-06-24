@@ -237,8 +237,21 @@ class BaseClass():
                 colnames = colnames.to_list()
                 colnames.append('covariate')
             df.columns = colnames
+            if self.baseline_ is not None:
+                baseline_row = df.iloc[[0]].copy()
+                baseline_row.iloc[0] = None
+                df = pd.concat((df, baseline_row))
+                is_baseline = [False]*len(df)
+                is_baseline[-1] = True
+                df['baseline'] = is_baseline
+                
         else:
-            df = pd.DataFrame({'covariate': self.covariate_names_})
+            if self._has_covariates:
+                df = pd.DataFrame({'covariate': self.covariate_names_})
+            elif self.baseline_ is not None:
+                df = pd.DataFrame({'baseline': [False, True]})
+            else:
+                raise ValueError('BDA with no stratification by condition, and no baseline.')
         return df
     def get_design_matrix(self):
         """
@@ -736,12 +749,13 @@ class BDA(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
-    def _mean_center(self, matrix):
-        out = matrix - matrix.mean(axis=0)
-        return out
+    _mean_center = True
     def _get_design_scores(self):
         # Align individual observations with design saliences
-        design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+        if self.baseline_ is None:
+            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+        else:
+            design_sal_labels = list(self.design_sal_labels_.iloc[:-1, :-1].itertuples(index=False, name=None))
         design_scores = []
         for obs_label in self.label_frame_.iloc[:, self.modeled_].itertuples(index=False, name=None):
             idx = design_sal_labels.index(obs_label)
@@ -787,18 +801,20 @@ class BDA(BaseClass):
                                      self.label_mat_,
                                      self.modeled_,
                                      self.baseline_)
-        M = self._mean_center(M)
+        if self._mean_center:
+            M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
         self._initial_decomposition(M)
-        self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
+        self.design_sal_labels_ = self._get_design_sal_labels()
         self.design_scores_ = self._get_design_scores()
         # Compute boot stat
         scores = self.transform()
         SM = utils.stratified_average(scores,
                                       self.label_mat_,
-                                      self.modeled_)
+                                      self.modeled_,
+                                      self.baseline_)
         if self.boot_stat == 'condwise-scores-centred':
-            self.boot_stat_val_ = self._mean_center(SM)
+            self.boot_stat_val_ = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
         return self
@@ -820,7 +836,8 @@ class BDA(BaseClass):
                                      permuted_labels,
                                      self.modeled_,
                                      self.baseline_)
-        M = self._mean_center(M)
+        if self._mean_center:
+            M = utils.mean_center(M)
         s = self._svd(M, compute_uv=False)
         return s
     def _single_resample(self, resample, alignment_method):
@@ -829,8 +846,10 @@ class BDA(BaseClass):
         resampled_label_mat_ = self.label_mat_[resample]
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
-                                     self.modeled_)
-        M = self._mean_center(M)
+                                     self.modeled_,
+                                     self.baseline_)
+        if self._mean_center:
+            M = utils.mean_center(M)
         u, s, v = self._svd(M)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
         scores = self.transform(resampled_data)
@@ -838,7 +857,7 @@ class BDA(BaseClass):
                                       resampled_label_mat_,
                                       self.modeled_)
         if self.boot_stat == 'condwise-scores-centred':
-            boot_stat = self._mean_center(SM)
+            boot_stat = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
             boot_stat = SM
         return boot_stat, resampled_data_sals

@@ -29,6 +29,10 @@ def corr(cov, data):
     cov_z = (cov - cov.mean(axis=0)) / cov.std(axis=0, ddof=1)
     return (cov_z.T @ data_z) / (len(data_z) - 1)
 
+def mean_center(matrix):
+    out = matrix - matrix.mean(axis=0)
+    return out
+
 def stratified_average(data, labels, modeled, baseline=None):
     while any(~modeled):
         if len(modeled) == 1:
@@ -60,6 +64,7 @@ def stratified_average(data, labels, modeled, baseline=None):
         elif baseline == 'div':
             baseline_val = 1
         baseline_row = baseline_val*np.ones_like(data[[0]])
+        # baseline_row = baseline_val*np.ones_like(data)
         data = np.concat((data, baseline_row))
     return data
 
