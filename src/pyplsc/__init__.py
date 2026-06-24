@@ -751,16 +751,20 @@ class BDA(BaseClass):
     _has_covariates = False
     _mean_center = True
     def _get_design_scores(self):
-        # Align individual observations with design saliences
-        if self.baseline_ is None:
-            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+        if not any(self.modeled_):
+            design_scores = np.concat([self.design_sals_]*len(self.data_))
         else:
-            design_sal_labels = list(self.design_sal_labels_.iloc[:-1, :-1].itertuples(index=False, name=None))
-        design_scores = []
-        for obs_label in self.label_frame_.iloc[:, self.modeled_].itertuples(index=False, name=None):
-            idx = design_sal_labels.index(obs_label)
-            design_scores.append(self.design_sals_[idx])
-        return np.stack(design_scores)
+            # Align individual observations with design saliences
+            if self.baseline_ is None:
+                design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+            else:
+                design_sal_labels = list(self.design_sal_labels_.iloc[:-1, :-1].itertuples(index=False, name=None))
+            design_scores = []
+            for obs_label in self.label_frame_.iloc[:, self.modeled_].itertuples(index=False, name=None):
+                idx = design_sal_labels.index(obs_label)
+                design_scores.append(self.design_sals_[idx])
+            design_scores = np.stack(design_scores)
+        return design_scores
     def fit(self, data, labels, modeled, baseline=None):
         """
         Fit a BDA model.
