@@ -94,7 +94,7 @@ class BaseClass():
         mat_cols = [labels[col].cat.codes for col in labels.columns]
         self.label_mat_ = np.stack(mat_cols).T
         # Check that each observation can be uniquely identified
-        clusters = pd.MultiIndex.from_arrays(self.label_mat_.T)
+        clusters = np.unique(self.label_mat_, axis=0)
         if len(clusters.unique()) < len(labels):
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, modeled):
@@ -213,8 +213,7 @@ class BaseClass():
         if any(self.modeled_):
             # Stratify the same way as when computing the matrix to factorize
             modeled_labels = self.label_frame_.iloc[:, self.modeled_]
-            stratifier = pd.MultiIndex.from_arrays(self.label_mat_[:, self.modeled_].T)
-            label_sets = stratifier.unique()
+            label_sets, label_ids = np.unique(self.label_mat_[:, self.modeled_], axis=0, return_inverse=True)
             rows = []
             for label_set in label_sets:
                 # Create row
@@ -477,12 +476,11 @@ class BaseClass():
                                                   rng)
                 # Check for min unique 
                 resampled_label_mat_ = self.label_mat_[resample]
-                stratifier = pd.MultiIndex.from_arrays(resampled_label_mat_[:, stratify].T)
-                labels = stratifier.unique()
+                unique_labels, label_ids = np.unique(resampled_label_mat_, axis=0, return_inverse=True)
                 # Assume valid, break on first invalid resample
                 validated = True
-                for label in labels:
-                    obs_id = resample[stratifier == label]
+                for label_id in range(len(unique_labels)):
+                    obs_id = resample[label_ids == label_id]
                     if len(np.unique(obs_id)) < min_unique:
                         validated = False
                         break
@@ -835,7 +833,6 @@ class BDA(BaseClass):
             elif self.baseline_ == 'div':
                 # Divisive baseline---invert
                 data[flips] **= -1
-                
         M = utils.stratified_average(data,
                                      permuted_labels,
                                      self.modeled_,

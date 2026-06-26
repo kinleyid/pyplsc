@@ -46,7 +46,6 @@ def stratified_average(data, labels, modeled, baseline=None):
             # Stratify by all but the level at which averages are taken
             stratify = np.array([True]*len(modeled))
             stratify[avg_level] = False
-            
             unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)
             Ms = []
             for label_id in range(len(unique_labels)):
