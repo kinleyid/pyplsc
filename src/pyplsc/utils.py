@@ -33,7 +33,7 @@ def mean_center(matrix):
     out = matrix - matrix.mean(axis=0)
     return out
 
-def stratified_average(data, labels, modeled, baseline=None):
+def stratified_average(data, labels, modeled):
     while any(~modeled):
         if len(modeled) == 1:
             # No more hierarchical structure
@@ -57,16 +57,6 @@ def stratified_average(data, labels, modeled, baseline=None):
             # Create new, smaller labels matrix and modeled indicator
             labels = np.stack(unique_labels)
             modeled = modeled[stratify]
-    '''
-    if baseline is not None:
-        if baseline == 'add':
-            baseline_val = 0
-        elif baseline == 'div':
-            baseline_val = 1
-        baseline_row = baseline_val*np.ones_like(data[[0]])
-        # baseline_row = baseline_val*np.ones_like(data)
-        data = np.concat((data, baseline_row))
-    '''
     return data
 
 def stratified_corrs(data, covariates, labels, modeled):

@@ -236,21 +236,14 @@ class BaseClass():
                 colnames = colnames.to_list()
                 colnames.append('covariate')
             df.columns = colnames
-            if self.baseline_ is not None:
-                baseline_row = df.iloc[[0]].copy()
-                baseline_row.iloc[0] = None
-                df = pd.concat((df, baseline_row))
-                is_baseline = [False]*len(df)
-                is_baseline[-1] = True
-                df['baseline'] = is_baseline
                 
         else:
             if self._has_covariates:
                 df = pd.DataFrame({'covariate': self.covariate_names_})
-            elif self.baseline_ is not None:
-                df = pd.DataFrame({'baseline': [False, True]})
+            elif self.intercept:
+                df = pd.DataFrame({'placeholder': [None]})
             else:
-                raise ValueError('BDA with no stratification by condition, and no baseline.')
+                raise ValueError('BDA with no stratification by condition, and no intercept.')
         return df
     def get_design_matrix(self):
         """
@@ -360,7 +353,7 @@ class BaseClass():
                                            self.permute_,
                                            np.random.default_rng(child_seq),
                                            return_cov_perm=self._has_covariates,
-                                           return_flips=self.baseline_ is not None)
+                                           return_flips=self.intercept)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -592,7 +585,6 @@ class PLSC(BaseClass):
     """
     _min_unique = 2 # For resampling
     _has_covariates = True
-    baseline_ = None
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
@@ -747,23 +739,22 @@ class BDA(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
-    _mean_center = True
+    def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, intercept=False):
+        self.intercept = intercept
+        super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
         if not any(self.modeled_):
             design_scores = np.concat([self.design_sals_]*len(self.data_))
         else:
             # Align individual observations with design saliences
-            if self.baseline_ is None:
-                design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
-            else:
-                design_sal_labels = list(self.design_sal_labels_.iloc[:-1, :-1].itertuples(index=False, name=None))
+            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
             design_scores = []
             for obs_label in self.label_frame_.iloc[:, self.modeled_].itertuples(index=False, name=None):
                 idx = design_sal_labels.index(obs_label)
                 design_scores.append(self.design_sals_[idx])
             design_scores = np.stack(design_scores)
         return design_scores
-    def fit(self, data, labels, modeled, baseline=None):
+    def fit(self, data, labels, modeled):
         """
         Fit a BDA model.
 
@@ -798,11 +789,9 @@ class BDA(BaseClass):
         self._setup_data(data)
         self._setup_labels(labels)
         self._setup_stratification(modeled)
-        self.baseline_ = baseline
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
-                                     self.modeled_,
-                                     self.baseline_)
+                                     self.modeled_)
         if self._mean_center:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
@@ -813,30 +802,24 @@ class BDA(BaseClass):
         scores = self.transform()
         SM = utils.stratified_average(scores,
                                       self.label_mat_,
-                                      self.modeled_,
-                                      self.baseline_)
+                                      self.modeled_)
         if self.boot_stat == 'condwise-scores-centred':
             self.boot_stat_val_ = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
         return self
     def _single_permutation(self, permuted_labels, flips=None):
-        if self.baseline_ is None:
-            # Skip copying to save time
-            data = self.data_
-        else:
+        if self.intercept:
             # Need to copy so as not to alter original data
             data = self.data_.copy()
-            if self.baseline_ == 'add':
-                # Additive baseline---flip signs
-                data[flips] *= -1
-            elif self.baseline_ == 'div':
-                # Divisive baseline---invert
-                data[flips] **= -1
+            # Flip signs
+            data[flips] *= -1
+        else:
+            # Skip copying to save time
+            data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
-                                     self.modeled_,
-                                     self.baseline_)
+                                     self.modeled_)
         if self._mean_center:
             M = utils.mean_center(M)
         s = self._svd(M, compute_uv=False)
@@ -847,8 +830,7 @@ class BDA(BaseClass):
         resampled_label_mat_ = self.label_mat_[resample]
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
-                                     self.modeled_,
-                                     self.baseline_)
+                                     self.modeled_)
         if self._mean_center:
             M = utils.mean_center(M)
         u, s, v = self._svd(M)
