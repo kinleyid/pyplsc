@@ -58,7 +58,10 @@ class BaseClass():
             if self._has_covariates:
                 self.boot_stat = 'score-covariate-corr'
             else:
-                self.boot_stat = 'condwise-scores-centred'
+                if self._intercept:
+                    self.boot_stat = 'condwise-scores'
+                else:
+                    self.boot_stat = 'condwise-scores-centred'
     def _reset(self):
         # Reset variables that track whether perm_done and boot_done
         self._perm_done = False
