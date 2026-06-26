@@ -94,8 +94,8 @@ class BaseClass():
         mat_cols = [labels[col].cat.codes for col in labels.columns]
         self.label_mat_ = np.stack(mat_cols).T
         # Check that each observation can be uniquely identified
-        clusters = np.unique(self.label_mat_, axis=0)
-        if len(clusters.unique()) < len(labels):
+        unique_clusters = np.unique(self.label_mat_, axis=0)
+        if len(unique_clusters) < len(labels):
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, modeled):
         # Set up attributes that determine how data will be stratified
@@ -240,7 +240,7 @@ class BaseClass():
         else:
             if self._has_covariates:
                 df = pd.DataFrame({'covariate': self.covariate_names_})
-            elif self.intercept:
+            elif self._intercept:
                 df = pd.DataFrame({'placeholder': [None]})
             else:
                 raise ValueError('BDA with no stratification by condition, and no intercept.')
@@ -353,7 +353,7 @@ class BaseClass():
                                            self.permute_,
                                            np.random.default_rng(child_seq),
                                            return_cov_perm=self._has_covariates,
-                                           return_flips=self.intercept)
+                                           return_flips=self._intercept)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -467,9 +467,9 @@ class BaseClass():
                 resample = utils.cluster_resample(self.label_mat_,
                                                   self.resample_,
                                                   rng)
-                # Check for min unique 
-                resampled_label_mat_ = self.label_mat_[resample]
-                unique_labels, label_ids = np.unique(resampled_label_mat_, axis=0, return_inverse=True)
+                # Check for min unique within stratification levels
+                resampled_stratifiers = self.label_mat_[resample][:, self.modeled_]
+                unique_labels, label_ids = np.unique(resampled_stratifiers, axis=0, return_inverse=True)
                 # Assume valid, break on first invalid resample
                 validated = True
                 for label_id in range(len(unique_labels)):
@@ -585,6 +585,7 @@ class PLSC(BaseClass):
     """
     _min_unique = 2 # For resampling
     _has_covariates = True
+    _intercept = False
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
@@ -740,7 +741,7 @@ class BDA(BaseClass):
     _min_unique = 1 # For resampling
     _has_covariates = False
     def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, intercept=False):
-        self.intercept = intercept
+        self._intercept = intercept
         super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
         if not any(self.modeled_):
@@ -792,7 +793,7 @@ class BDA(BaseClass):
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
                                      self.modeled_)
-        if self._mean_center:
+        if not self._intercept:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
         self._initial_decomposition(M)
@@ -809,7 +810,7 @@ class BDA(BaseClass):
             self.boot_stat_val_ = SM
         return self
     def _single_permutation(self, permuted_labels, flips=None):
-        if self.intercept:
+        if self._intercept:
             # Need to copy so as not to alter original data
             data = self.data_.copy()
             # Flip signs
@@ -820,7 +821,7 @@ class BDA(BaseClass):
         M = utils.stratified_average(data,
                                      permuted_labels,
                                      self.modeled_)
-        if self._mean_center:
+        if not self._intercept:
             M = utils.mean_center(M)
         s = self._svd(M, compute_uv=False)
         return s
@@ -831,7 +832,7 @@ class BDA(BaseClass):
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
                                      self.modeled_)
-        if self._mean_center:
+        if not self._intercept:
             M = utils.mean_center(M)
         u, s, v = self._svd(M)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
