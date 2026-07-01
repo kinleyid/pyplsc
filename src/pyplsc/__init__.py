@@ -356,7 +356,7 @@ class BaseClass():
                                            self.permute_,
                                            np.random.default_rng(child_seq),
                                            return_cov_perm=self._has_covariates,
-                                           return_flips=self._intercept)
+                                           return_flips=self._flips)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -459,10 +459,6 @@ class BaseClass():
             return boot_stats
     def _get_resamples(self, n_boot, min_unique, silent):
         rng = np.random.default_rng(self.random_state)
-        # Set up to verify min unique
-        corr_level = np.where(~self.modeled_)[0][-1]
-        stratify = np.array([True]*len(self.modeled_))
-        stratify[corr_level] = False
         resamples = []
         for resample_n in tqdm(range(n_boot), desc='Getting resamples', disable=silent):
             validated = False
@@ -743,8 +739,11 @@ class BDA(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
+    _flips = False
     def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, intercept=False):
         self._intercept = intercept
+        if self._intercept:
+            self._flips = True
         super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
         if not any(self.modeled_):
@@ -796,12 +795,14 @@ class BDA(BaseClass):
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
                                      self.modeled_)
-        if not self._intercept:
+        if self._intercept:
+            self.intercept_ = M.mean(axis=0, keepdims=True)
+        else:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
         self._initial_decomposition(M)
-        self.design_sal_labels_ = self._get_design_sal_labels()
-        self.design_scores_ = self._get_design_scores()
+        # self.design_sal_labels_ = self._get_design_sal_labels()
+        # self.design_scores_ = self._get_design_scores()
         # Compute boot stat
         scores = self.transform()
         SM = utils.stratified_average(scores,
@@ -821,10 +822,25 @@ class BDA(BaseClass):
         else:
             # Skip copying to save time
             data = self.data_
+        # data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
                                      self.modeled_)
-        if not self._intercept:
+        if self._intercept:
+            '''
+            M = utils.mean_center(M)
+            resample = utils.cluster_resample(self.label_mat_,
+                                              self.resample_,
+                                              np.random.default_rng())
+            means = utils.stratified_average(data[resample],
+                                             self.label_mat_[resample],
+                                             self.modeled_)
+            resampled_intercept = means.mean(axis=0, keepdims=True)
+            intercept_diff = resampled_intercept - self.intercept_
+            M += intercept_diff
+            '''
+            pass
+        else:
             M = utils.mean_center(M)
         s = self._svd(M, compute_uv=False)
         return s
@@ -848,3 +864,4 @@ class BDA(BaseClass):
         elif self.boot_stat == 'condwise-scores':
             boot_stat = SM
         return boot_stat, resampled_data_sals
+    

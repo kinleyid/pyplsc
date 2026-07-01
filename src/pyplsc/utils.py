@@ -33,7 +33,7 @@ def mean_center(matrix):
     out = matrix - matrix.mean(axis=0)
     return out
 
-def stratified_average(data, labels, modeled):
+def stratified_average_old(data, labels, modeled):
     while any(~modeled):
         if len(modeled) == 1:
             # No more hierarchical structure
@@ -57,6 +57,51 @@ def stratified_average(data, labels, modeled):
             # Create new, smaller labels matrix and modeled indicator
             labels = np.stack(unique_labels)
             modeled = modeled[stratify]
+    '''
+    baseline_idx = labels[:, -1].astype(bool)
+    data = np.concat((data[~baseline_idx],
+                      data[baseline_idx].mean(axis=0, keepdims=True)))
+    '''
+    return data
+
+def stratified_average(data, labels, modeled):
+    '''
+    # Subtract baseline
+    data = data.copy()
+    # Sort to make sure they align
+    data[labels[:, -1] == 0] -= data[labels[:, -1] == 1]
+    data[labels[:, -1] == 1] -= data[labels[:, -1] == 1]
+    '''
+    # Stack the effect matrices
+    while any(~modeled):
+        if len(modeled) == 1:
+            # No more hierarchical structure
+            # Average within this final level
+            data = data.mean(axis=0, keepdims=True)
+            break
+        else:
+            # Find lowest unmodeled level to average over
+            avg_level = np.where(~modeled)[0][-1]
+            # Stratify by all but the level at which averages are taken
+            stratify = np.array([True]*len(modeled))
+            stratify[avg_level] = False
+            unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)
+            Ms = []
+            for label_id in range(len(unique_labels)):
+                mask = label_ids == label_id
+                M = data[mask].mean(axis=0)
+                Ms.append(M)
+            
+            data = np.stack(Ms)
+            # Create new, smaller labels matrix and modeled indicator
+            labels = np.stack(unique_labels)
+            modeled = modeled[stratify]
+    '''
+    baseline_idx = labels[:, -1].astype(bool)
+    data = np.concat((data[~baseline_idx],
+                      data[baseline_idx].mean(axis=0, keepdims=True)))
+    '''
+    # data = data.mean(axis=0, keepdims=True)
     return data
 
 def stratified_corrs(data, covariates, labels, modeled):
@@ -172,7 +217,7 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=Fa
     
     # Flip to model baseline?
     if return_flips:
-        flips = rng.random(len(permuted_labels)) < 0.5
+        flips = rng.choice([-1, 1], len(permuted_labels))
         out += (flips,)
 
     return out
