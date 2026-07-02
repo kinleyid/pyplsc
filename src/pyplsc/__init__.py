@@ -818,6 +818,7 @@ class BDA(BaseClass):
             # Need to copy so as not to alter original data
             data = self.data_.copy()
             # Flip signs
+            # data *= flips
             data[flips] *= -1
         else:
             # Skip copying to save time

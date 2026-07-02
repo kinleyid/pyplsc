@@ -217,7 +217,8 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=Fa
     
     # Flip to model baseline?
     if return_flips:
-        flips = rng.choice([-1, 1], len(permuted_labels))
+        # flips = rng.choice([-1, 1], len(permuted_labels))
+        flips = rng.random(len(permuted_labels)) < 0.5
         out += (flips,)
 
     return out
