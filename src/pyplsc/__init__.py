@@ -58,7 +58,7 @@ class BaseClass():
             if self._has_covariates:
                 self.boot_stat = 'score-covariate-corr'
             else:
-                if self._intercept:
+                if self._include_intercept:
                     self.boot_stat = 'condwise-scores'
                 else:
                     self.boot_stat = 'condwise-scores-centred'
@@ -243,8 +243,8 @@ class BaseClass():
         else:
             if self._has_covariates:
                 df = pd.DataFrame({'covariate': self.covariate_names_})
-            elif self._intercept:
-                df = pd.DataFrame({'placeholder': [None]})
+            elif self._include_intercept:
+                df = pd.DataFrame({'Placeholder': ['(Intercept)']})
             else:
                 raise ValueError('BDA with no stratification by condition, and no intercept.')
         return df
@@ -356,7 +356,7 @@ class BaseClass():
                                            self.permute_,
                                            np.random.default_rng(child_seq),
                                            return_cov_perm=self._has_covariates,
-                                           return_flips=self._flips)
+                                           return_flips=self._test_intercept)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -584,7 +584,8 @@ class PLSC(BaseClass):
     """
     _min_unique = 2 # For resampling
     _has_covariates = True
-    _intercept = False
+    _include_intercept = False
+    _test_intercept = False
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
@@ -739,11 +740,11 @@ class BDA(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
-    _flips = False
-    def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, intercept=False):
-        self._intercept = intercept
-        if self._intercept:
-            self._flips = True
+    def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, include_intercept=False, test_intercept=False):
+        self._include_intercept = include_intercept
+        if test_intercept and not include_intercept:
+            raise ValueError('test_intercept cannot be true if include_intercept is false')
+        self._test_intercept = test_intercept
         super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
         if not any(self.modeled_):
@@ -795,14 +796,12 @@ class BDA(BaseClass):
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
                                      self.modeled_)
-        if self._intercept:
-            self.intercept_ = M.mean(axis=0, keepdims=True)
-        else:
+        if not self._include_intercept:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
         self._initial_decomposition(M)
-        # self.design_sal_labels_ = self._get_design_sal_labels()
-        # self.design_scores_ = self._get_design_scores()
+        self.design_sal_labels_ = self._get_design_sal_labels()
+        self.design_scores_ = self._get_design_scores()
         # Compute boot stat
         scores = self.transform()
         SM = utils.stratified_average(scores,
@@ -814,12 +813,17 @@ class BDA(BaseClass):
             self.boot_stat_val_ = SM
         return self
     def _single_permutation(self, permuted_labels, flips=None):
-        if self._intercept:
-            # Need to copy so as not to alter original data
+        if self._test_intercept:
+            # Find highest unmodeled label level
+            flip_level = np.where(~self.modeled_)[0][0]
+            # Flip at highest unmodeled level
+            flip_idx = flips[permuted_labels[:, flip_level]]
+            # need to copy so as not to alter original data
             data = self.data_.copy()
             # Flip signs
             # data *= flips
-            data[flips] *= -1
+            # data[flips] *= -1
+            data[flip_idx] *= -1
         else:
             # Skip copying to save time
             data = self.data_
@@ -827,21 +831,7 @@ class BDA(BaseClass):
         M = utils.stratified_average(data,
                                      permuted_labels,
                                      self.modeled_)
-        if self._intercept:
-            '''
-            M = utils.mean_center(M)
-            resample = utils.cluster_resample(self.label_mat_,
-                                              self.resample_,
-                                              np.random.default_rng())
-            means = utils.stratified_average(data[resample],
-                                             self.label_mat_[resample],
-                                             self.modeled_)
-            resampled_intercept = means.mean(axis=0, keepdims=True)
-            intercept_diff = resampled_intercept - self.intercept_
-            M += intercept_diff
-            '''
-            pass
-        else:
+        if not self._include_intercept:
             M = utils.mean_center(M)
         s = self._svd(M, compute_uv=False)
         return s
@@ -852,7 +842,7 @@ class BDA(BaseClass):
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
                                      self.modeled_)
-        if not self._intercept:
+        if not self._include_intercept:
             M = utils.mean_center(M)
         u, s, v = self._svd(M)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
