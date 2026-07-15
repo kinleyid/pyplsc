@@ -688,14 +688,13 @@ class PLSC(BaseClass):
                                                            self.label_mat_,
                                                            self.modeled_)
         return self
-    def _single_permutation(self, permuted_labels, cov_perm):
+    def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_[cov_perm],
                                    # labels=permuted_labels,
                                    labels=self.label_mat_,
                                    modeled=self.modeled_)
-        s = self._svd(R, compute_uv=False)
-        return s
+        return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average
         resampled_data = self.data_[resample]
@@ -812,7 +811,7 @@ class BDA(BaseClass):
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
         return self
-    def _single_permutation(self, permuted_labels, flips=None):
+    def _single_permutation(self, permuted_labels, flips=None, compute_uv=False):
         if self._test_intercept:
             # Find highest unmodeled label level
             flip_level = np.where(~self.modeled_)[0][0]
@@ -833,8 +832,7 @@ class BDA(BaseClass):
                                      self.modeled_)
         if not self._include_intercept:
             M = utils.mean_center(M)
-        s = self._svd(M, compute_uv=False)
-        return s
+        return self._svd(M, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average
         resampled_data = self.data_[resample]
