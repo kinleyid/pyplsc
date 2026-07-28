@@ -5,7 +5,8 @@ from sklearn.utils.extmath import randomized_svd
 from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
-import copy
+import os, pathlib
+import lzma, pickle
 
 from . import utils
 
@@ -25,6 +26,31 @@ class BadStrArgError(Exception):
 def _check_str_arg(argname, provided, allowed):
     if provided not in allowed:
         raise BadStrArgError(argname, provided, allowed)
+
+def load(path):
+    """
+    Load a model from .xz. This is a thin wrapper around Python's ``lzma`` library.
+
+    Parameters
+    ----------
+    path : ``str``
+        Path to model. If no extension is included, .xz will be added.
+
+    Returns
+    -------
+    model
+        The loaded model, of the same .
+    """
+    
+    path = pathlib.Path(path)
+    file, ext = os.path.splitext(path)
+    if ext == '':
+        path = path.with_suffix('.xz')
+        basename = os.path.basename(path)
+        print('Loading %s' % basename)
+    with lzma.open(path, 'rb') as f:
+        model = pickle.load(f)
+    return model
 
 class BaseClass():
     def __init__(self, svd_method='lapack', boot_stat=None, random_state=None):
@@ -100,11 +126,11 @@ class BaseClass():
         unique_clusters = np.unique(self.label_mat_, axis=0)
         if len(unique_clusters) < len(labels):
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
-    def _setup_stratification(self, modeled):
+    def _setup_stratification(self, stratify):
         # Set up attributes that determine how data will be stratified
-        self.modeled_ = np.array(modeled)
-        self.resample_ = ~self.modeled_ # TODO: set as needed
-        self.permute_ = self.modeled_
+        self.stratify_ = np.array(stratify)
+        self.resample_ = ~self.stratify_ # TODO: set as needed
+        self.permute_ = self.stratify_
     def _svd(self, M, compute_uv=True):
         # Single function to perform svd using the specified method
         if self.svd_method == 'lapack':
@@ -129,6 +155,10 @@ class BaseClass():
         self.design_sals_ = u
         self.data_sals_ = v
         self._fitted = True
+    def _recompose(self):
+        # Inverse of decompose
+        u, s, v = self.design_sals_, self.singular_vals_, self.data_sals_
+        return u * s @ v.T
     def summary(self):
         """
         Summarize the model.
@@ -213,16 +243,16 @@ class BaseClass():
         data_scores = data @ sals
         return data_scores
     def _get_design_sal_labels(self):
-        if any(self.modeled_):
+        if any(self.stratify_):
             # Stratify the same way as when computing the matrix to factorize
-            modeled_labels = self.label_frame_.iloc[:, self.modeled_]
-            label_sets, label_ids = np.unique(self.label_mat_[:, self.modeled_], axis=0, return_inverse=True)
+            stratify_labels = self.label_frame_.iloc[:, self.stratify_]
+            label_sets, label_ids = np.unique(self.label_mat_[:, self.stratify_], axis=0, return_inverse=True)
             rows = []
             for label_set in label_sets:
                 # Create row
                 row = []
                 for col_idx, cat_idx in enumerate(label_set):
-                    cat = modeled_labels.iloc[:, col_idx].cat.categories[cat_idx]
+                    cat = stratify_labels.iloc[:, col_idx].cat.categories[cat_idx]
                     row.append(cat)
                 if self._has_covariates:
                     # Add extra column for covariate
@@ -234,7 +264,7 @@ class BaseClass():
                 else:
                     rows.append(row)
             df = pd.DataFrame(rows)
-            colnames = self.label_frame_.columns[self.modeled_]
+            colnames = self.label_frame_.columns[self.stratify_]
             if self._has_covariates:
                 colnames = colnames.to_list()
                 colnames.append('covariate')
@@ -364,14 +394,14 @@ class BaseClass():
         seeds = rng.integers(0, 2**31, size=n_perm)
         perms = Parallel(n_jobs=n_jobs)(
             delayed(utils.cluster_permute)(self.label_mat_,
-                                           self.modeled_,
+                                           self.stratify_,
                                            rng,
                                            return_cov_perm=self._has_covariates)
             for _ in tqdm(perms, desc='Getting permutations', disable=silent)
         )
         perms = [
             utils.cluster_permute(self.label_mat_,
-                                  self.modeled_,
+                                  self.stratify_,
                                   rng,
                                   return_cov_perm=self._has_covariates)
             for perm_n in tqdm(range(n_perm), desc='Getting permutations', disable=silent)
@@ -467,7 +497,7 @@ class BaseClass():
                                                   self.resample_,
                                                   rng)
                 # Check for min unique within stratification levels
-                resampled_stratifiers = self.label_mat_[resample][:, self.modeled_]
+                resampled_stratifiers = self.label_mat_[resample][:, self.stratify_]
                 unique_labels, label_ids = np.unique(resampled_stratifiers, axis=0, return_inverse=True)
                 # Assume valid, break on first invalid resample
                 validated = True
@@ -562,6 +592,29 @@ class BaseClass():
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
+    
+    def save(self, path):
+        """
+        Save a model to .xz using the LZMA algorithm. This is a thin wrapper around python's ``lzma`` library.
+
+        Parameters
+        ----------
+        path : ``str``
+            Path to model. If no extension is included, .xz will be added.
+
+        Returns
+        -------
+        None
+        """
+        
+        path = pathlib.Path(path)
+        file, ext = os.path.splitext(path)
+        if ext == '':
+            path = path.with_suffix('.xz')
+            basename = os.path.basename(path)
+            print('Saving to %s' % basename)
+        with lzma.open(path, "wb") as f:
+            pickle.dump(self, f)
 
 class PLSC(BaseClass):
     """
@@ -609,8 +662,8 @@ class PLSC(BaseClass):
         design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
         # Align the observations with the design saliences, level-wise
         design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
-        modeled_labels = self.label_frame_.iloc[:, self.modeled_]
-        obs_labels = list(modeled_labels.itertuples(index=False, name=None))
+        stratify_labels = self.label_frame_.iloc[:, self.stratify_]
+        obs_labels = list(stratify_labels.itertuples(index=False, name=None))
         # Loop over levels of stratifying variables
         for curr_label in set(obs_labels):
             # Find where the observations are at this level, and which design saliences correspond to it
@@ -624,7 +677,7 @@ class PLSC(BaseClass):
             # Multiply them to get the current design scores
             design_scores[obs_mask] = obs_submat @ sal_submat
         return design_scores
-    def fit(self, data, covariates, labels, modeled):
+    def fit(self, data, covariates, labels, stratify):
         """
         Fit a PLSC model.
 
@@ -636,7 +689,7 @@ class PLSC(BaseClass):
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        modeled : numpy.ndarray | list
+        stratify : numpy.ndarray | list
             Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
 
         Returns
@@ -658,20 +711,20 @@ class PLSC(BaseClass):
         >>> trial_labels = np.arange(np.sum(ptptwise_n_trials))
         >>> labels = pd.DataFrame({'cond': cond_labels, 'ptpt': ptpt_ids, 'trial': trial_labels})
         >>> # Stratify only by condition, not by participant or trial
-        >>> modeled = [True, False, False]
+        >>> stratify = [True, False, False]
         >>> # Fit model
         >>> mod = pyplsc.PLSC()
-        >>> mod.fit(data=data, covariates=covs, modeled=modeled)
+        >>> mod.fit(data=data, covariates=covs, stratify=stratify)
         """
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
         self._setup_labels(labels)
         self._setup_covariates(covariates)
-        self._setup_stratification(modeled)
+        self._setup_stratification(stratify)
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_,
                                    labels=self.label_mat_,
-                                   modeled=self.modeled_)
+                                   stratify=self.stratify_)
         self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
@@ -682,18 +735,18 @@ class PLSC(BaseClass):
             self.boot_stat_val_ = utils.stratified_corrs(scores,
                                                          self.covariates_,
                                                          self.label_mat_,
-                                                         self.modeled_)
+                                                         self.stratify_)
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = utils.stratified_average(scores,
                                                            self.label_mat_,
-                                                           self.modeled_)
+                                                           self.stratify_)
         return self
     def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_[cov_perm],
                                    # labels=permuted_labels,
                                    labels=self.label_mat_,
-                                   modeled=self.modeled_)
+                                   stratify=self.stratify_)
         return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average
@@ -703,7 +756,7 @@ class PLSC(BaseClass):
         R = utils.stratified_corrs(resampled_data,
                                    resampled_covs,
                                    resampled_label_mat_,
-                                   self.modeled_)
+                                   self.stratify_)
         u, s, v = self._svd(R)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
         scores = self.transform(resampled_data)
@@ -711,11 +764,11 @@ class PLSC(BaseClass):
             boot_stat = utils.stratified_corrs(scores,
                                                resampled_covs,
                                                resampled_label_mat_,
-                                               self.modeled_)
+                                               self.stratify_)
         elif self.boot_stat == 'condwise-scores':
             boot_stat = utils.stratified_average(scores,
                                                  resampled_label_mat_,
-                                                 self.modeled_)
+                                                 self.stratify_)
         return boot_stat, resampled_data_sals
 
 class BDA(BaseClass):
@@ -746,18 +799,18 @@ class BDA(BaseClass):
         self._test_intercept = test_intercept
         super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
-        if not any(self.modeled_):
+        if not any(self.stratify_):
             design_scores = np.concat([self.design_sals_]*len(self.data_))
         else:
             # Align individual observations with design saliences
             design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
             design_scores = []
-            for obs_label in self.label_frame_.iloc[:, self.modeled_].itertuples(index=False, name=None):
+            for obs_label in self.label_frame_.iloc[:, self.stratify_].itertuples(index=False, name=None):
                 idx = design_sal_labels.index(obs_label)
                 design_scores.append(self.design_sals_[idx])
             design_scores = np.stack(design_scores)
         return design_scores
-    def fit(self, data, labels, modeled):
+    def fit(self, data, labels, stratify):
         """
         Fit a BDA model.
 
@@ -769,7 +822,7 @@ class BDA(BaseClass):
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        modeled : numpy.ndarray | list
+        stratify : numpy.ndarray | list
             Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
 
         Returns
@@ -791,10 +844,10 @@ class BDA(BaseClass):
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
         self._setup_labels(labels)
-        self._setup_stratification(modeled)
+        self._setup_stratification(stratify)
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
-                                     self.modeled_)
+                                     self.stratify_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
@@ -805,7 +858,7 @@ class BDA(BaseClass):
         scores = self.transform()
         SM = utils.stratified_average(scores,
                                       self.label_mat_,
-                                      self.modeled_)
+                                      self.stratify_)
         if self.boot_stat == 'condwise-scores-centred':
             self.boot_stat_val_ = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
@@ -813,9 +866,9 @@ class BDA(BaseClass):
         return self
     def _single_permutation(self, permuted_labels, flips=None, compute_uv=False):
         if self._test_intercept:
-            # Find highest unmodeled label level
-            flip_level = np.where(~self.modeled_)[0][0]
-            # Flip at highest unmodeled level
+            # Find highest unstratify label level
+            flip_level = np.where(~self.stratify_)[0][0]
+            # Flip at highest unstratify level
             flip_idx = flips[permuted_labels[:, flip_level]]
             # need to copy so as not to alter original data
             data = self.data_.copy()
@@ -829,7 +882,7 @@ class BDA(BaseClass):
         # data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
-                                     self.modeled_)
+                                     self.stratify_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         return self._svd(M, compute_uv=compute_uv)
@@ -839,7 +892,7 @@ class BDA(BaseClass):
         resampled_label_mat_ = self.label_mat_[resample]
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
-                                     self.modeled_)
+                                     self.stratify_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         u, s, v = self._svd(M)
@@ -847,7 +900,7 @@ class BDA(BaseClass):
         scores = self.transform(resampled_data)
         SM = utils.stratified_average(scores,
                                       resampled_label_mat_,
-                                      self.modeled_)
+                                      self.stratify_)
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':

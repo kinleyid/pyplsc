@@ -33,38 +33,7 @@ def mean_center(matrix):
     out = matrix - matrix.mean(axis=0)
     return out
 
-def stratified_average_old(data, labels, modeled):
-    while any(~modeled):
-        if len(modeled) == 1:
-            # No more hierarchical structure
-            # Average within this final level
-            data = data.mean(axis=0, keepdims=True)
-            break
-        else:
-            # Find lowest unmodeled level to average over
-            avg_level = np.where(~modeled)[0][-1]
-            # Stratify by all but the level at which averages are taken
-            stratify = np.array([True]*len(modeled))
-            stratify[avg_level] = False
-            unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)
-            Ms = []
-            for label_id in range(len(unique_labels)):
-                mask = label_ids == label_id
-                M = data[mask].mean(axis=0)
-                Ms.append(M)
-            
-            data = np.stack(Ms)
-            # Create new, smaller labels matrix and modeled indicator
-            labels = np.stack(unique_labels)
-            modeled = modeled[stratify]
-    '''
-    baseline_idx = labels[:, -1].astype(bool)
-    data = np.concat((data[~baseline_idx],
-                      data[baseline_idx].mean(axis=0, keepdims=True)))
-    '''
-    return data
-
-def stratified_average(data, labels, modeled):
+def stratified_average(data, labels, stratify):
     '''
     # Subtract baseline
     data = data.copy()
@@ -73,19 +42,19 @@ def stratified_average(data, labels, modeled):
     data[labels[:, -1] == 1] -= data[labels[:, -1] == 1]
     '''
     # Stack the effect matrices
-    while any(~modeled):
-        if len(modeled) == 1:
+    while any(~stratify):
+        if len(stratify) == 1:
             # No more hierarchical structure
             # Average within this final level
             data = data.mean(axis=0, keepdims=True)
             break
         else:
-            # Find lowest unmodeled level to average over
-            avg_level = np.where(~modeled)[0][-1]
+            # Find lowest unstratify level to average over
+            avg_level = np.where(~stratify)[0][-1]
             # Stratify by all but the level at which averages are taken
-            stratify = np.array([True]*len(modeled))
-            stratify[avg_level] = False
-            unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)
+            curr_stratify = np.array([True]*len(stratify))
+            curr_stratify[avg_level] = False
+            unique_labels, label_ids = np.unique(labels[:, curr_stratify], axis=0, return_inverse=True)
             Ms = []
             for label_id in range(len(unique_labels)):
                 mask = label_ids == label_id
@@ -93,9 +62,9 @@ def stratified_average(data, labels, modeled):
                 Ms.append(M)
             
             data = np.stack(Ms)
-            # Create new, smaller labels matrix and modeled indicator
+            # Create new, smaller labels matrix and stratify indicator
             labels = np.stack(unique_labels)
-            modeled = modeled[stratify]
+            stratify = stratify[curr_stratify]
     '''
     baseline_idx = labels[:, -1].astype(bool)
     data = np.concat((data[~baseline_idx],
@@ -104,20 +73,20 @@ def stratified_average(data, labels, modeled):
     # data = data.mean(axis=0, keepdims=True)
     return data
 
-def stratified_corrs(data, covariates, labels, modeled):
+def stratified_corrs(data, covariates, labels, stratify):
     # Compute correlations within clusters, and possible average within higher-level clusters
-    assert any(~modeled)
+    assert any(~stratify)
     n_levels = labels.shape[1]
-    assert len(modeled) == n_levels
-    # Compute correlations across lowest unmodeled level
-    corr_level = np.where(~modeled)[0][-1]
+    assert len(stratify) == n_levels
+    # Compute correlations across lowest unstratify level
+    corr_level = np.where(~stratify)[0][-1]
     # Stratify by all but the level at which correlations are computed
-    stratify = np.array([True]*n_levels)
-    stratify[corr_level] = False
+    curr_stratify = np.array([True]*n_levels)
+    curr_stratify[corr_level] = False
     if n_levels == 1:
         R_mat = corr(covariates, data)
     else:
-        unique_labels, label_ids = np.unique(labels[:, stratify], axis=0, return_inverse=True)        
+        unique_labels, label_ids = np.unique(labels[:, curr_stratify], axis=0, return_inverse=True)        
         Rs = []
         for label_id in range(len(unique_labels)):
             mask = label_ids == label_id
@@ -126,13 +95,13 @@ def stratified_corrs(data, covariates, labels, modeled):
             
         R_mat = np.stack(Rs)
         # Update labels matrix to reflect the fact that the covariate level is no longer present
-        modeled = modeled[stratify]
-        if any(~modeled):
+        stratify = stratify[curr_stratify]
+        if any(~stratify):
             labels = np.stack(unique_labels)
             # First z-transform for averaging correlations
             z_mat = np.arctanh(R_mat)
-            # Average within higher unmodeled levels
-            z_mat = stratified_average(z_mat, labels, modeled)
+            # Average within higher unstratify levels
+            z_mat = stratified_average(z_mat, labels, stratify)
             # Back-transform to R
             R_mat = np.tanh(z_mat)
             # R_mat = z_mat
