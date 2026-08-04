@@ -744,8 +744,8 @@ class PLSC(BaseClass):
     def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_[cov_perm],
-                                   # labels=permuted_labels,
-                                   labels=self.label_mat_,
+                                   labels=permuted_labels,
+                                   # labels=self.label_mat_,
                                    stratify=self.stratify_)
         return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
