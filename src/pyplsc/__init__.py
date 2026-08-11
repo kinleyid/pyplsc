@@ -7,6 +7,7 @@ from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 import os, pathlib
 import lzma, pickle
+import seaborn as sns
 
 from . import utils
 
@@ -481,10 +482,11 @@ class BaseClass():
         self.data_sals_z_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
         self.data_sals_std_ = std_data_sals
         # Compute confidence intervals for design saliences
-        boot_stats = np.stack(boot_stat_dist)
+        boot_stats = np.stack(boot_stat_dist, axis=-1)
         alpha = 1 - confint_level
         self.boot_stat_ci_ = np.quantile(boot_stats, [alpha/2, 1 - alpha/2], axis=0)
         self._boot_done = True
+        self.boot_stats_ = boot_stats
         if return_boot_stat_dist:
             return boot_stats
     def _get_resamples(self, n_boot, min_unique, silent):
@@ -592,7 +594,8 @@ class BaseClass():
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
-    
+    def get_boot_stats(lv_idx):
+        pass
     def save(self, path):
         """
         Save a model to .xz using the LZMA algorithm. This is a thin wrapper around python's ``lzma`` library.
@@ -615,6 +618,20 @@ class BaseClass():
             print('Saving to %s' % basename)
         with lzma.open(path, "wb") as f:
             pickle.dump(self, f)
+    def plot_boot_stat(self, lv_idx):
+        if not isinstance(lv_idx, int):
+            raise ValueError('lv_idx must be an integer')
+        
+        if self._boot_done:
+            pass
+        else:
+            df = self.get_boot_stat_frame(lv_idx)
+        set_trace()
+        n_stratify = sum(self.stratify_)
+        sns.barplot(data=df,
+                    y='stat',
+                    x='between',
+                    hue='within')
 
 class PLSC(BaseClass):
     """
@@ -639,6 +656,7 @@ class PLSC(BaseClass):
     _has_covariates = True
     _include_intercept = False
     _test_intercept = False
+    _permute_labels = False
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
@@ -742,10 +760,13 @@ class PLSC(BaseClass):
                                                            self.stratify_)
         return self
     def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
+        if self._permute_labels:
+            labels = permuted_labels
+        else:
+            labels = self.label_mat_
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_[cov_perm],
-                                   labels=permuted_labels,
-                                   # labels=self.label_mat_,
+                                   labels=labels,
                                    stratify=self.stratify_)
         return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
