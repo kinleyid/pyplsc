@@ -192,6 +192,58 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=Fa
 
     return out
 
+def cluster_permute_index(labels, permute, rng, return_flips=False):
+    """
+    Returns a single permutation index `idx` of shape (n_obs,) that can be
+    applied to an entire design matrix -- e.g.
+        full_design = np.hstack([labels, covariates])
+        full_design[idx]
+    -- to jointly shuffle condition labels and covariates.
+
+    Semantics: find the deepest (finest) level flagged True in `permute`.
+    That's the granularity at which whole rows get exchanged -- i.e. an
+    observation's label(s) at that level and below, plus its covariates,
+    move together as a unit. Strata are formed from any *ancestor* levels
+    (indices < deepest) that are NOT flagged for permutation, so rows are
+    only exchanged within groups that must stay intact (e.g. subject,
+    or a higher-level grouping you don't want to test).
+
+    Caveat: this can't reproduce coarse-level relabeling where a label is
+    reassigned to unequal-sized child-clusters while their covariates and
+    finer labels stay attached to their original rows -- that requires
+    per-column permutations, not one shared row index. Use the original
+    cluster_permute for that case.
+    """
+    n_obs, n_levels = labels.shape
+    idx = np.arange(n_obs)
+
+    permute_levels = [lvl for lvl, p in enumerate(permute) if p]
+    if not permute_levels:
+        out = (idx,)
+        if return_flips:
+            out += (rng.random(n_obs) < 0.5,)
+        return out
+
+    deepest = max(permute_levels)
+
+    # Ancestor levels above `deepest` that must stay fixed define the strata
+    fixed_levels = [lvl for lvl in range(deepest) if not permute[lvl]]
+    if fixed_levels:
+        strata_cols = labels[:, fixed_levels]
+        _, strata_inv = np.unique(strata_cols, axis=0, return_inverse=True)
+    else:
+        strata_inv = np.zeros(n_obs, dtype=int)
+
+    for s in np.unique(strata_inv):
+        mask = strata_inv == s
+        idx[mask] = idx[mask][rng.permutation(mask.sum())]
+
+    out = (idx,)
+    if return_flips:
+        flips = rng.random(n_obs) < 0.5
+        out += (flips,)
+    return out
+
 def cluster_resample(labels, resample, rng):
     labels = labels.copy()
     n_obs, n_levels = labels.shape

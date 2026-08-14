@@ -8,6 +8,7 @@ import pandas as pd
 import os, pathlib
 import lzma, pickle
 import seaborn as sns
+from matplotlib import pyplot as plt
 
 from . import utils
 
@@ -482,13 +483,12 @@ class BaseClass():
         self.data_sals_z_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
         self.data_sals_std_ = std_data_sals
         # Compute confidence intervals for design saliences
-        boot_stats = np.stack(boot_stat_dist, axis=-1)
+        boot_stats = np.stack(boot_stat_dist)
         alpha = 1 - confint_level
         self.boot_stat_ci_ = np.quantile(boot_stats, [alpha/2, 1 - alpha/2], axis=0)
         self._boot_done = True
-        self.boot_stats_ = boot_stats
-        if return_boot_stat_dist:
-            return boot_stats
+        # Store boot stats
+        self.boot_stat_dist_ = boot_stats
     def _get_resamples(self, n_boot, min_unique, silent):
         rng = np.random.default_rng(self.random_state)
         resamples = []
@@ -540,25 +540,22 @@ class BaseClass():
         """
         if not self._fitted:
             raise NotFittedError()
-        if lv_idx is None:
-            lv_idx = list(range(self.n_sv_))
+        if not isinstance(lv_idx, int):
+            raise ValueError('lv_idx must be an int')
+        if self._boot_done:
+            n_boot = len(self.boot_stat_dist_)
+            # Dataframe with one row per replicate
+            df = pd.concat([self.design_sal_labels_]*n_boot)
+            df['lv_idx'] = lv_idx
+            df['stat'] = self.boot_stat_dist_[:, :, lv_idx].flatten()
         else:
-            try:
-                len(lv_idx)
-            except:
-                lv_idx = [lv_idx]
-        lv_idxs = lv_idx
-        lv_subdfs = []
-        for lv_idx in lv_idxs:
-            sub_df = self.design_sal_labels_.copy()
-            sub_df['lv_idx'] = lv_idx
-            sub_df['stat'] = self.boot_stat_val_[:, lv_idx]
+            # Fixed boot_stat values
+            df = self.design_sal_labels_.copy()
+            df['lv_idx'] = lv_idx
+            df['stat'] = self.boot_stat_val_[:, lv_idx]
             if self._boot_done:
-                sub_df['L_CI'] = self.boot_stat_ci_[0, :, lv_idx]
-                sub_df['U_CI'] = self.boot_stat_ci_[1, :, lv_idx]
-            lv_subdfs.append(sub_df)
-        df = pd.concat(lv_subdfs)
-        df = df.reset_index(drop=True)
+                df['L_CI'] = self.boot_stat_ci_[0, :, lv_idx]
+                df['U_CI'] = self.boot_stat_ci_[1, :, lv_idx]
         return df
     def get_boot_stat_yerr(self, lv_idx):
         """
@@ -594,8 +591,6 @@ class BaseClass():
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
-    def get_boot_stats(lv_idx):
-        pass
     def save(self, path):
         """
         Save a model to .xz using the LZMA algorithm. This is a thin wrapper around python's ``lzma`` library.
@@ -618,20 +613,40 @@ class BaseClass():
             print('Saving to %s' % basename)
         with lzma.open(path, "wb") as f:
             pickle.dump(self, f)
-    def plot_boot_stat(self, lv_idx):
+    def plot_boot_stat(self, lv_idx, confint_level=0.95):
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
-        
-        if self._boot_done:
-            pass
+        df = self.get_boot_stat_frame(lv_idx)
+        aes_vars = self.design_sal_labels_.columns
+        if len(aes_vars) < 3:
+            # No need to facetgrid
+            kwargs = {'data': df, 'y': 'stat'}
+            if self._boot_done:
+                kwargs['errorbar'] = ('pi', 100*confint_level)
+            if len(aes_vars) == 1:
+                styles = ['x']
+            elif len(aes_vars) == 2:
+                styles = ['x', 'hue']
+            for style, aes_var in zip(styles, aes_vars):
+                kwargs[style] = aes_var
+            out = sns.barplot(**kwargs)
+        elif len(aes_vars) < 5:
+            # Need to facet
+            fg_kwargs = {'data': df, 'hue': aes_vars[-1]}
+            fg_kwargs['row'] = aes_vars[0]
+            if len(aes_vars) == 4:
+                fg_kwargs['col'] = aes_vars[1]
+            # barplot kwargs
+            bp_kwargs = {'x': aes_vars[-2], 'y': 'stat'}
+            if self._boot_done:
+                bp_kwargs['errorbar'] = ('pi', 100*confint_level)
+            g = sns.FacetGrid(**fg_kwargs)
+            g.map_dataframe(sns.barplot, **bp_kwargs, order=df['within'].unique())
+            g.add_legend()
+            out = g
         else:
-            df = self.get_boot_stat_frame(lv_idx)
-        set_trace()
-        n_stratify = sum(self.stratify_)
-        sns.barplot(data=df,
-                    y='stat',
-                    x='between',
-                    hue='within')
+            raise ValueError('Cannot create a plot for more than 4 stratifying variables')
+        return out
 
 class PLSC(BaseClass):
     """
