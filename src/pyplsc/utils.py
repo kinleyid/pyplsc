@@ -195,6 +195,7 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=Fa
 
     return out
 
+'''
 def cluster_permute_index(labels, permute, rng, return_flips=False):
     """
     Returns a single permutation index `idx` of shape (n_obs,) that can be
@@ -246,6 +247,7 @@ def cluster_permute_index(labels, permute, rng, return_flips=False):
         flips = rng.random(n_obs) < 0.5
         out += (flips,)
     return out
+'''
 
 def cluster_resample(labels, resample, rng):
     labels = labels.copy()
