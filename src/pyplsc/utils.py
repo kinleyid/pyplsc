@@ -73,7 +73,7 @@ def stratified_average(data, labels, stratify):
     # data = data.mean(axis=0, keepdims=True)
     return data
 
-def stratified_corrs(data, covariates, labels, stratify):
+def stratified_corrs(data, covariates, labels, stratify, z_transform=True):
     # Compute correlations within clusters, and possible average within higher-level clusters
     assert any(~stratify)
     n_levels = labels.shape[1]
@@ -98,13 +98,16 @@ def stratified_corrs(data, covariates, labels, stratify):
         stratify = stratify[curr_stratify]
         if any(~stratify):
             labels = np.stack(unique_labels)
-            # First z-transform for averaging correlations
-            z_mat = np.arctanh(R_mat)
-            # Average within higher unstratify levels
-            z_mat = stratified_average(z_mat, labels, stratify)
-            # Back-transform to R
-            R_mat = np.tanh(z_mat)
-            # R_mat = z_mat
+            if z_transform:
+                # First z-transform for averaging correlations
+                z_mat = np.arctanh(R_mat)
+                # Average within higher unstratify levels
+                z_mat = stratified_average(z_mat, labels, stratify)
+                # Back-transform to R
+                R_mat = np.tanh(z_mat)
+                # R_mat = z_mat
+            else:
+                R_mat = stratified_average(R_mat, labels, stratify)
         # Stack such that covariate is represented along first axis
         R_mat = np.concat(R_mat)
     # R_mat = np.abs(R_mat).mean(axis=0, keepdims=True)

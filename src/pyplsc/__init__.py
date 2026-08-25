@@ -10,7 +10,7 @@ import lzma, pickle
 import seaborn as sns
 from matplotlib import pyplot as plt
 
-from . import utils
+from . import utils, viz
 
 from pdb import set_trace
 from scipy.linalg import orthogonal_procrustes
@@ -336,7 +336,7 @@ class BaseClass():
         df = pd.concat(lv_subdfs)
         df = df.reset_index(drop=True)
         return df
-    def permute(self, n_perm=5000, return_null_dist=True, n_jobs=1, print_prog=True):
+    def permute(self, n_perm=5000, method='simultaneous', return_null_dist=True, n_jobs=1, print_prog=True):
         """
         Perform permutation testing to assess the significance of the latent variables. p values become available after running this method through the :attr:`pvals_` property.
 
@@ -368,14 +368,28 @@ class BaseClass():
         silent = not print_prog
         # Pre-generate perm_idx
         perms = self._get_permutations(n_perm, n_jobs, silent)
-        perm_singvals = Parallel(n_jobs=n_jobs)(
-            delayed(self._single_permutation)(*perm)
-            for perm in tqdm(perms, desc='Permuting', disable=silent)
-        )
-        null_dist = np.stack(perm_singvals)
-        pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
-        # Nullify p vals based on the rank of the matrix being decomposed
-        pvals[self.rank_:] = np.nan
+        if method == 'deflate':
+            pvals = np.nan*np.array([0]*self.n_sv_)
+            for component in range(self.rank_):
+                self._set_data_to_permute(method, component)
+                desc = 'Permuting comp. %s' % component
+                perm_singvals = Parallel(n_jobs=n_jobs)(
+                    delayed(self._single_permutation)(*perm)
+                    for perm in tqdm(perms, desc=desc, disable=silent)
+                )
+                # Only take the top compoment
+                null_dist = np.stack(perm_singvals)[:, 0]
+                pvals[component] = (np.sum(null_dist >= self.singular_vals_[component], axis=0) + 1) / (n_perm + 1)
+        elif method == 'simultaneous':
+            self._set_data_to_permute(method)
+            perm_singvals = Parallel(n_jobs=n_jobs)(
+                delayed(self._single_permutation)(*perm)
+                for perm in tqdm(perms, desc='Permuting', disable=silent)
+            )
+            null_dist = np.stack(perm_singvals)
+            pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
+            # Nullify p vals based on the rank of the matrix being decomposed
+            pvals[self.rank_:] = np.nan
         self.pvals_ = pvals
         self._perm_done = True
         if return_null_dist:
@@ -487,8 +501,9 @@ class BaseClass():
         alpha = 1 - confint_level
         self.boot_stat_ci_ = np.quantile(boot_stats, [alpha/2, 1 - alpha/2], axis=0)
         self._boot_done = True
-        # Store boot stats
-        self.boot_stat_dist_ = boot_stats
+        # Return boot stats?
+        if return_boot_stat_dist:
+            return boot_stats
     def _get_resamples(self, n_boot, min_unique, silent):
         rng = np.random.default_rng(self.random_state)
         resamples = []
@@ -523,7 +538,7 @@ class BaseClass():
             A = np.diag([1]*self.n_sv_)
         aligned = v*s @ A
         return aligned
-    def get_boot_stat_frame(self, lv_idx=None):
+    def get_boot_stat_frame(self, lv_idx=None, ci='minmax'):
         """
         Get :attr:`boot_stat` as a dataframe, including upper and lower confidence limits if bootstrap resampling has been done.
 
@@ -531,6 +546,8 @@ class BaseClass():
         ----------
         lv_idx : indexer, optional
             Index of latent variable the dataframe should cover. The default is None, which yields a dataframe covering all latent variables.
+        ci : str, optional
+            Specifies how to get confidence interval values. 'minmax' gives the actual minimum and maximum values that define the interval (useful for ggplot); 'len' gives the lengths of the upper and lower portions of the interval (useful for matplotlib).
 
         Returns
         -------
@@ -542,20 +559,22 @@ class BaseClass():
             raise NotFittedError()
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an int')
+        _check_str_arg('ci', ci, ['minmax', 'len'])
+        # Fixed boot_stat values
+        df = self.design_sal_labels_.copy()
+        df['lv_idx'] = lv_idx
+        df['stat'] = self.boot_stat_val_[:, lv_idx]
+        # Bootstrap CIs?
         if self._boot_done:
-            n_boot = len(self.boot_stat_dist_)
-            # Dataframe with one row per replicate
-            df = pd.concat([self.design_sal_labels_]*n_boot)
-            df['lv_idx'] = lv_idx
-            df['stat'] = self.boot_stat_dist_[:, :, lv_idx].flatten()
-        else:
-            # Fixed boot_stat values
-            df = self.design_sal_labels_.copy()
-            df['lv_idx'] = lv_idx
-            df['stat'] = self.boot_stat_val_[:, lv_idx]
-            if self._boot_done:
-                df['L_CI'] = self.boot_stat_ci_[0, :, lv_idx]
-                df['U_CI'] = self.boot_stat_ci_[1, :, lv_idx]
+            val = self.boot_stat_val_[:, lv_idx]
+            lo = self.boot_stat_ci_[0, :, lv_idx]
+            hi = self.boot_stat_ci_[1, :, lv_idx]
+            if ci == 'minmax':
+                df['L_CI'] = lo
+                df['U_CI'] = hi
+            elif ci == 'len':
+                df['L_CI'] = val - lo
+                df['U_CI'] = hi - val
         return df
     def get_boot_stat_yerr(self, lv_idx):
         """
@@ -616,37 +635,14 @@ class BaseClass():
     def plot_boot_stat(self, lv_idx, confint_level=0.95):
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
-        df = self.get_boot_stat_frame(lv_idx)
+        df = self.get_boot_stat_frame(lv_idx, ci='len')
         aes_vars = self.design_sal_labels_.columns
-        if len(aes_vars) < 3:
-            # No need to facetgrid
-            kwargs = {'data': df, 'y': 'stat'}
-            if self._boot_done:
-                kwargs['errorbar'] = ('pi', 100*confint_level)
-            if len(aes_vars) == 1:
-                styles = ['x']
-            elif len(aes_vars) == 2:
-                styles = ['x', 'hue']
-            for style, aes_var in zip(styles, aes_vars):
-                kwargs[style] = aes_var
-            out = sns.barplot(**kwargs)
-        elif len(aes_vars) < 5:
-            # Need to facet
-            fg_kwargs = {'data': df, 'hue': aes_vars[-1]}
-            fg_kwargs['row'] = aes_vars[0]
-            if len(aes_vars) == 4:
-                fg_kwargs['col'] = aes_vars[1]
-            # barplot kwargs
-            bp_kwargs = {'x': aes_vars[-2], 'y': 'stat'}
-            if self._boot_done:
-                bp_kwargs['errorbar'] = ('pi', 100*confint_level)
-            g = sns.FacetGrid(**fg_kwargs)
-            g.map_dataframe(sns.barplot, **bp_kwargs, order=df['within'].unique())
-            g.add_legend()
-            out = g
-        else:
-            raise ValueError('Cannot create a plot for more than 4 stratifying variables')
-        return out
+        boot_stat_labels = {
+            'score-covariate-corr': 'Data score vs covariate correlation',
+            'condwise-scores': 'Data score',
+            'condwise-scores-centred': 'Data score'}
+        ylabel = boot_stat_labels[self.boot_stat]
+        return viz.plot_boot_stat(df, aes_vars, ylabel=ylabel)
 
 class PLSC(BaseClass):
     """
@@ -672,6 +668,7 @@ class PLSC(BaseClass):
     _include_intercept = False
     _test_intercept = False
     _permute_labels = False
+    _z_transform = True
     def _setup_covariates(self, covariates):
         if isinstance(covariates, pd.DataFrame):
             self.covariate_names_ = covariates.columns
@@ -757,7 +754,8 @@ class PLSC(BaseClass):
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_,
                                    labels=self.label_mat_,
-                                   stratify=self.stratify_)
+                                   stratify=self.stratify_,
+                                   z_transform=self._z_transform)
         self.rank_ = np.linalg.matrix_rank(R)
         self._initial_decomposition(R)
         self.design_sal_labels_ = self._get_design_sal_labels() # TODO: implement
@@ -768,31 +766,48 @@ class PLSC(BaseClass):
             self.boot_stat_val_ = utils.stratified_corrs(scores,
                                                          self.covariates_,
                                                          self.label_mat_,
-                                                         self.stratify_)
+                                                         self.stratify_,
+                                                         z_transform=self._z_transform)
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = utils.stratified_average(scores,
                                                            self.label_mat_,
                                                            self.stratify_)
         return self
+    def _set_data_to_permute(self, method, component=None):
+        if method == 'simultaneous':
+            self._data_to_permute = self.data_
+            self._covs_to_permute = self.covariates_
+        elif method == 'deflate':
+            if component == 0:
+                self._data_to_permute = self.data_
+                self._covs_to_permute = self.covariates_
+            else:
+                data_subtract = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
+                # data_deflated = self.transform() @ self.data_sals_[:, component:].T
+                covs_subtract = self.design_scores_[:, :component] @ self.design_sals_[:, :component].T
+                self._data_to_permute = self.data_ - data_subtract
+                self._covs_to_permute = self.covariates_ - covs_subtract
     def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
         if self._permute_labels:
             labels = permuted_labels
         else:
             labels = self.label_mat_
-        R = utils.stratified_corrs(data=self.data_,
-                                   covariates=self.covariates_[cov_perm],
+        R = utils.stratified_corrs(data=self._data_to_permute,
+                                   covariates=self._covs_to_permute[cov_perm],
                                    labels=labels,
-                                   stratify=self.stratify_)
+                                   stratify=self.stratify_,
+                                   z_transform=self._z_transform)
         return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average
         resampled_data = self.data_[resample]
         resampled_covs = self.covariates_[resample]
         resampled_label_mat_ = self.label_mat_[resample]
-        R = utils.stratified_corrs(resampled_data,
-                                   resampled_covs,
-                                   resampled_label_mat_,
-                                   self.stratify_)
+        R = utils.stratified_corrs(data=resampled_data,
+                                   covariates=resampled_covs,
+                                   labels=resampled_label_mat_,
+                                   stratify=self.stratify_,
+                                   z_transform=self._z_transform)
         u, s, v = self._svd(R)
         resampled_data_sals = self._align(u, s, v, method=alignment_method)
         scores = self.transform(resampled_data)
@@ -900,6 +915,16 @@ class BDA(BaseClass):
         elif self.boot_stat == 'condwise-scores':
             self.boot_stat_val_ = SM
         return self
+    def _set_data_to_permute(self, method, component=None):
+        if method == 'simultaneous':
+            self._data_to_permute = self.data_
+        elif method == 'deflate':
+            if component == 0:
+                self._data_to_permute = self.data_
+            else:
+                data_subtract = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
+                # data_deflated = self.transform() @ self.data_sals_[:, component:].T
+                self._data_to_permute = self.data_ - data_subtract
     def _single_permutation(self, permuted_labels, flips=None, compute_uv=False):
         if self._test_intercept:
             # Find highest unstratify label level
