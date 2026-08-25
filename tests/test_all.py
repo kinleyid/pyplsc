@@ -84,7 +84,9 @@ def test_bda_basic(fit_bda):
     f, ax = pyplsc.viz.plot_boot_stat(df, mapping=fit_bda.design_sal_labels_.columns)
     pyplsc.viz.plot_boot_stat(df, ax=ax[0, 0],
                               mapping={'row': 'between', 'col': 'within'})
-
+    fit_bda.save('temp')
+    pyplsc.load('temp')
+    
 def test_errors(sample_data):
     data, _, labels, stratify = sample_data
     bda = pyplsc.BDA()
