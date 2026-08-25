@@ -557,24 +557,30 @@ class BaseClass():
         """
         if not self._fitted:
             raise NotFittedError()
-        if not isinstance(lv_idx, int):
-            raise ValueError('lv_idx must be an int')
+        if lv_idx is None:
+            lv_idx = range(self.n_sv_)
+        elif isinstance(lv_idx, int):
+            lv_idx = [lv_idx]
         _check_str_arg('ci', ci, ['minmax', 'len'])
         # Fixed boot_stat values
-        df = self.design_sal_labels_.copy()
-        df['lv_idx'] = lv_idx
-        df['stat'] = self.boot_stat_val_[:, lv_idx]
-        # Bootstrap CIs?
-        if self._boot_done:
-            val = self.boot_stat_val_[:, lv_idx]
-            lo = self.boot_stat_ci_[0, :, lv_idx]
-            hi = self.boot_stat_ci_[1, :, lv_idx]
-            if ci == 'minmax':
-                df['L_CI'] = lo
-                df['U_CI'] = hi
-            elif ci == 'len':
-                df['L_CI'] = val - lo
-                df['U_CI'] = hi - val
+        lvwise_dfs = []
+        for curr_lv_idx in lv_idx:
+            lv_df = self.design_sal_labels_.copy()
+            lv_df['lv_idx'] = curr_lv_idx
+            lv_df['stat'] = self.boot_stat_val_[:, curr_lv_idx]
+            # Bootstrap CIs?
+            if self._boot_done:
+                val = self.boot_stat_val_[:, curr_lv_idx]
+                lo = self.boot_stat_ci_[0, :, curr_lv_idx]
+                hi = self.boot_stat_ci_[1, :, curr_lv_idx]
+                if ci == 'minmax':
+                    lv_df['L_CI'] = lo
+                    lv_df['U_CI'] = hi
+                elif ci == 'len':
+                    lv_df['L_CI'] = val - lo
+                    lv_df['U_CI'] = hi - val
+            lvwise_dfs.append(lv_df)
+        df = pd.concat(lvwise_dfs)
         return df
     def get_boot_stat_yerr(self, lv_idx):
         """
