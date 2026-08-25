@@ -44,10 +44,7 @@ In contrast to other PLS implementations, `pyplsc` does not require data to be p
 ```python
 mod = BDA()
 mod.fit(data=data_array,
-		design=design_matrix_dataframe,
-		between='group',
-		within='cond',
-		participant='subj')
+		labels=design_matrix_dataframe)
 ```
 
 See the [documentation](https://pyplsc.readthedocs.io/) for more details and examples.
