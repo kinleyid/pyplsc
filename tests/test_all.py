@@ -58,7 +58,8 @@ def test_bda_basic(fit_bda):
     # Simple testing of model fitting
     assert len(fit_bda.design_sal_labels_) == len(fit_bda.design_sals_)
     fit_bda.get_scores_frame()
-    fit_bda.plot_boot_stat(0)
+    f, ax = fit_bda.plot_boot_stat(0)
+    fit_bda.plot_boot_stat(0, ax=ax[0, 0])
     fit_bda.get_scores_frame(lv_idx=[0, 1])
     fit_bda.permute(n_perm=5)
     fit_bda.bootstrap(n_boot=5)

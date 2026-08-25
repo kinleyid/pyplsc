@@ -637,7 +637,7 @@ class BaseClass():
             print('Saving to %s' % basename)
         with lzma.open(path, "wb") as f:
             pickle.dump(self, f)
-    def plot_boot_stat(self, lv_idx):
+    def plot_boot_stat(self, lv_idx, ax=None):
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
         df = self.get_boot_stat_frame(lv_idx, ci='len')
@@ -647,7 +647,7 @@ class BaseClass():
             'condwise-scores': 'Data score',
             'condwise-scores-centred': 'Data score'}
         ylabel = boot_stat_labels[self.boot_stat]
-        return viz.plot_boot_stat(df, aes_vars, ylabel=ylabel)
+        return viz.plot_boot_stat(df, aes_vars, ylabel=ylabel, ax=ax)
 
 class PLSC(BaseClass):
     """
