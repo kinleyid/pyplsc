@@ -637,7 +637,7 @@ class BaseClass():
             print('Saving to %s' % basename)
         with lzma.open(path, "wb") as f:
             pickle.dump(self, f)
-    def plot_boot_stat(self, lv_idx, confint_level=0.95):
+    def plot_boot_stat(self, lv_idx):
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
         df = self.get_boot_stat_frame(lv_idx, ci='len')
