@@ -7,7 +7,6 @@ from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 import os, pathlib
 import lzma, pickle
-import seaborn as sns
 from matplotlib import pyplot as plt
 
 from . import utils, viz
