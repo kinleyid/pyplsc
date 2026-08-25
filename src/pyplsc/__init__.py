@@ -641,13 +641,13 @@ class BaseClass():
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
         df = self.get_boot_stat_frame(lv_idx, ci='len')
-        aes_vars = self.design_sal_labels_.columns
+        mapping = self.design_sal_labels_.columns
         boot_stat_labels = {
             'score-covariate-corr': 'Data score vs covariate correlation',
             'condwise-scores': 'Data score',
             'condwise-scores-centred': 'Data score'}
         ylabel = boot_stat_labels[self.boot_stat]
-        return viz.plot_boot_stat(df, aes_vars, ylabel=ylabel, ax=ax)
+        return viz.plot_boot_stat(df, mapping, ylabel=ylabel, ax=ax)
 
 class PLSC(BaseClass):
     """

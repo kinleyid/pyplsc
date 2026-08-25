@@ -4,26 +4,25 @@ import numpy as np
 
 from pdb import set_trace
 
-def plot_boot_stat(df, stratifying, ax=None, ylabel=None,
+def plot_boot_stat(df, mapping, ax=None, ylabel=None,
                    bar_width=0.8,
                    group_gap=0.1,
                    capsize=None):
-    # Stratifying should be a list of variables
-    # or a dictionary with {aes: var}
-    n_strat = len(stratifying)
+    n_strat = len(mapping)
     if n_strat > 4:
         raise ValueError('Cannot create a plot for more than 4 stratifying variables')
     auto_aes = ['x', 'hue', 'row', 'column']
-    mapping = {k: None for k in auto_aes}
-    if isinstance(stratifying, dict):
-        for k in stratifying:
-            mapping[k] = stratifying[k]
+    auto_mapping = {k: None for k in auto_aes}
+    if isinstance(mapping, dict):
+        for k in mapping:
+            auto_mapping[k] = mapping[k]
     else:
-        stratifying = list(stratifying)
+        mapping = list(mapping)
         for i in range(n_strat):
             aes = auto_aes[i]
-            var = stratifying[::-1][i]
-            mapping[aes] = var
+            var = mapping[::-1][i]
+            auto_mapping[aes] = var
+    mapping = auto_mapping
     
     # Count number of levels for each variable
     mapping_counts = {}
