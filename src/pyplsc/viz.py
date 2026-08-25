@@ -8,6 +8,38 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
                    bar_width=0.8,
                    group_gap=0.1,
                    capsize=None):
+    """
+    Create barplot of bootstrap statistic.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Output of the ``get_boot_stat_frame`` method.
+    mapping : iterable or dict
+        Dictionary mapping from aesthetics (``'x'``, ``'hue'``, ``'row'``, or ``'column'``)  to variables, or else an iterable of the variables to be plotted.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot to. The default is None, in which case a new figure is created.
+    ylabel : str, optional
+        Name of statistic being plotted. The default is None.
+    bar_width : float, optional
+        Width of bars. The default is 0.8.
+    group_gap : float, optional
+        Gap between different groups of bars within the same axis. The default is 0.1.
+    capsize : float, optional
+        Cap size for confidence intervals. The default is None.
+
+    Returns
+    -------
+    f : matplotlib.figure.Figure
+        Figure containing the plot.
+
+    Examples
+    --------
+    >>> f, ax = plt.subplots()
+    >>> df = mod.get_boot_stat_frame(lv_idx=0, ci='len')
+    >>> plot_bot_stat(df, mapping={'hue': 'covariate'}, ax=ax)
+    
+    """
     n_strat = len(mapping)
     if n_strat > 4:
         raise ValueError('Cannot create a plot for more than 4 stratifying variables')
@@ -127,8 +159,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
             bbox_to_anchor=(1.0, 0.5),
         )
 
-    f.tight_layout()
-    return f, ax
+    return f
 
 def _get_boot_stat_ax(ax, nrows, ncols):
     if ax is None:

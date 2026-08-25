@@ -638,6 +638,22 @@ class BaseClass():
         with lzma.open(path, "wb") as f:
             pickle.dump(self, f)
     def plot_boot_stat(self, lv_idx, ax=None):
+        """
+        Bar plot of bootstrap statistic.
+
+        Parameters
+        ----------
+        lv_idx : int
+            Index of latent variable to plot.
+        ax : matplotlib.axes.Axes, optional
+            Axes to plot to. The default is None, in which case a new figure is created.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Figure containing the plot.
+
+        """
         if not isinstance(lv_idx, int):
             raise ValueError('lv_idx must be an integer')
         df = self.get_boot_stat_frame(lv_idx, ci='len')
