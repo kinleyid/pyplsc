@@ -81,8 +81,8 @@ def test_bda_basic(fit_bda):
     df['U_CI'] = df['U_CI'].abs()
     fit_bda.get_boot_stat_frame(lv_idx=[0, 1])
     fit_bda.get_design_matrix()
-    f, ax = pyplsc.viz.plot_boot_stat(df, mapping=fit_bda.design_sal_labels_.columns)
-    pyplsc.viz.plot_boot_stat(df, ax=ax[0, 0],
+    f = pyplsc.viz.plot_boot_stat(df, mapping=fit_bda.design_sal_labels_.columns)
+    pyplsc.viz.plot_boot_stat(df, ax=f.axes[0],
                               mapping={'row': 'between', 'col': 'within'})
     fit_bda.save('temp')
     pyplsc.load('temp')
