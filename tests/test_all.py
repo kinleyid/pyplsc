@@ -108,7 +108,7 @@ def test_nrm_basic(fit_bda):
     df['L_CI'] = df['L_CI'].abs()
     df['U_CI'] = df['U_CI'].abs()
     fit_bda.get_design_matrix()
-    
+
 def test_errors(sample_data):
     data, _, labels, stratify = sample_data
     bda = pyplsc.BDA()

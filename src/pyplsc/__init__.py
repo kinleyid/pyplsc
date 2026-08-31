@@ -378,6 +378,8 @@ class BaseClass():
                 for perm in tqdm(perms, desc=desc, disable=silent)
             )
         if method == 'deflate':
+            raise NotImplementedError()
+            """
             pvals = np.nan*np.array([0]*self.n_sv_)
             for component in range(self.rank_):
                 self._set_data_to_permute(method, component)
@@ -392,6 +394,7 @@ class BaseClass():
                 null_dist = np.stack(perm_singvals)
                 null_dist = null_dist[:, 0]
                 pvals[component] = (np.sum(null_dist >= self.singular_vals_[component], axis=0) + 1) / (n_perm + 1)
+            """
         elif method == 'simultaneous':
             self._set_data_to_permute(method)
             perm_singvals = get_perm_singvals(perms, desc='permuting')
@@ -836,6 +839,8 @@ class PLSC(BaseClass):
             self._data_to_permute = self.data_
             self._covs_to_permute = self.covariates_
         elif method == 'deflate':
+            raise NotImplementedError()
+            """
             data = self.data_.copy()
             covs = self.covariates_.copy()
             # Center data within exchangeability blocks
@@ -867,6 +872,7 @@ class PLSC(BaseClass):
                                        do_scale=False)
             u, s, v = self._svd(R, compute_uv=True)
             '''
+            """
     def _single_permutation(self, cov_perm, method, compute_uv=False):
         # If using deflation method, we'll already have scaled the data and can save time
         do_scale = method != 'deflate'
@@ -998,12 +1004,15 @@ class BDA(BaseClass):
         if method == 'simultaneous':
             self._data_to_permute = self.data_
         elif method == 'deflate':
+            raise NotImplementedError()
+            """
             if component == 0:
                 self._data_to_permute = self.data_
             else:
                 data_scores = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
                 # data_deflated = self.transform() @ self.data_sals_[:, component:].T
                 self._data_to_permute = self.data_ - data_scores
+            """
         # Test validity
         M = utils.stratified_average(self._data_to_permute,
                                      self.label_mat_,
