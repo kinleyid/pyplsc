@@ -1209,23 +1209,25 @@ class NRM(BaseClass):
         else:
             # Skip copying to save time
             data = self.data_
-        # data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
                                      self.stratify_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         return self._apply_contrasts(M, return_contrasts=False)
-    def _single_resample(self, resample, alignment_method):
-        # Compute stacked cormats within ptpts and then average
+    def _single_resample(self, resample, alignment_method=None):
+        # Apply resample
         resampled_data = self.data_[resample]
         resampled_label_mat_ = self.label_mat_[resample]
+        # Compute cond-wise averages
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
                                      self.stratify_)
         if not self._include_intercept:
             M = utils.mean_center(M)
+        # Apply contrasts
         norms, resampled_data_sals = self._apply_contrasts(M)
+        # Compute boot stat
         scores = self.transform(resampled_data)
         SM = utils.stratified_average(scores,
                                       resampled_label_mat_,
