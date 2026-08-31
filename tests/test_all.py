@@ -96,18 +96,16 @@ def test_bda_basic(fit_bda):
     fit_bda.save('temp')
     pyplsc.load('temp')
     
-def test_nrm_basic(fit_bda):
+def test_nrm_basic(fit_nrm):
     # Simple testing of model fitting
-    assert len(fit_bda.design_sal_labels_) == len(fit_bda.design_sals_)
-    fit_bda.permute(n_perm=5)
-    fit_bda.bootstrap(n_boot=5)
-    fit_bda.bootstrap(n_boot=2)
-    assert fit_bda.design_scores_ is not None
-    fit_bda.get_boot_stat_frame()
-    df = fit_bda.get_boot_stat_frame(lv_idx=0, ci='len')
-    df['L_CI'] = df['L_CI'].abs()
-    df['U_CI'] = df['U_CI'].abs()
-    fit_bda.get_design_matrix()
+    assert len(fit_nrm.design_sal_labels_) == len(fit_nrm.design_sals_)
+    fit_nrm.permute(n_perm=5)
+    fit_nrm.bootstrap(n_boot=5)
+    fit_nrm.bootstrap(n_boot=2)
+    assert fit_nrm.design_scores_ is not None
+    fit_nrm.get_boot_stat_frame()
+    fit_nrm.get_boot_stat_frame(lv_idx=0, ci='len')
+    fit_nrm.get_design_matrix()
 
 def test_errors(sample_data):
     data, _, labels, stratify = sample_data
