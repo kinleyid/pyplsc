@@ -22,12 +22,16 @@ def get_design_for_sorted(group_sizes, n_cond=1):
         'participant': pd.Categorical(participant)})
     return design
 
-def corr(cov, data):
+def scale(M, axis=0):
+    return (M - M.mean(axis=axis)) / M.std(axis=axis) / np.sqrt(M.shape[axis])
+
+def corr(covs, data, do_scale=True):
     # Compute a rectangular correlation matrix between data and Y
-    # z-score data and covariate
-    data_z = (data - data.mean(axis=0)) / data.std(axis=0, ddof=1)
-    cov_z = (cov - cov.mean(axis=0)) / cov.std(axis=0, ddof=1)
-    return (cov_z.T @ data_z) / (len(data_z) - 1)
+    if do_scale:
+        R = scale(covs).T @ scale(data)
+    else:
+        R = covs.T @ data
+    return R
 
 def mean_center(matrix):
     out = matrix - matrix.mean(axis=0)
@@ -73,7 +77,7 @@ def stratified_average(data, labels, stratify):
     # data = data.mean(axis=0, keepdims=True)
     return data
 
-def stratified_corrs(data, covariates, labels, stratify, z_transform=True):
+def stratified_corrs(data, covariates, labels, stratify, z_transform=True, do_scale=True):
     # Compute correlations within clusters, and possible average within higher-level clusters
     assert any(~stratify)
     n_levels = labels.shape[1]
@@ -84,13 +88,13 @@ def stratified_corrs(data, covariates, labels, stratify, z_transform=True):
     curr_stratify = np.array([True]*n_levels)
     curr_stratify[corr_level] = False
     if n_levels == 1:
-        R_mat = corr(covariates, data)
+        R_mat = corr(covariates, data, do_scale=do_scale)
     else:
         unique_labels, label_ids = np.unique(labels[:, curr_stratify], axis=0, return_inverse=True)        
         Rs = []
         for label_id in range(len(unique_labels)):
             mask = label_ids == label_id
-            R = corr(covariates[mask], data[mask])
+            R = corr(covariates[mask], data[mask], do_scale=do_scale)
             Rs.append(R)
             
         R_mat = np.stack(Rs)
@@ -113,6 +117,26 @@ def stratified_corrs(data, covariates, labels, stratify, z_transform=True):
     # R_mat = np.abs(R_mat).mean(axis=0, keepdims=True)
     # R_mat = R_mat - R_mat.mean()
     return R_mat
+
+def _permute_covariates(labels, permute, rng):
+    n_obs, n_levels = labels.shape
+    cov_perm = np.arange(n_obs)
+    if n_levels == 1:
+        # No stratification, just shuffle
+        cov_perm = rng.permutation(n_obs)
+    else:
+        # Shuffle only at lowest permuted level
+        permute_levels, = np.where(~permute)
+        lowest_level = max(permute_levels)
+        stratify = np.ones_like(permute)
+        stratify[lowest_level] = False
+        parent_cols = labels[:, stratify]
+        _, parent_inv = np.unique(parent_cols, axis=0, return_inverse=True)
+        for idx in range(parent_inv.max() + 1):
+            mask = parent_inv == idx
+            perm = rng.permutation(mask.sum())
+            cov_perm[mask] = cov_perm[mask][perm]
+    return (cov_perm,)
 
 def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=False):
     permuted_labels = labels.copy()

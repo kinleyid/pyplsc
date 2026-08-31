@@ -7,7 +7,6 @@ from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 import os, pathlib
 import lzma, pickle
-from matplotlib import pyplot as plt
 
 from . import utils, viz
 
@@ -55,7 +54,8 @@ def load(path):
 
 class BaseClass():
     def __init__(self, svd_method='lapack', boot_stat=None, random_state=None):
-        _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
+        if not isinstance(self, NRM): # svd_method is not applicable to NRMs
+            _check_str_arg('svd_method', svd_method, ('lapack', 'randomized'))
         # Private attributes for tracking whether permutation testing and bootstrap resampling have been done
         self._fitted = False
         self._reset()
@@ -113,6 +113,8 @@ class BaseClass():
         if isinstance(labels, np.ndarray):
             labels = pd.DataFrame(labels)
             labels.columns = ['label_%s' % i for i in range(len(labels.columns))]
+        elif isinstance(labels, pd.Series):
+            labels = pd.DataFrame(labels)
         elif not isinstance(labels, pd.DataFrame):
             raise ValueError('Data labels must be pandas DataFrame or numpy array')
         # Convert columns to categorical
@@ -129,6 +131,8 @@ class BaseClass():
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, stratify):
         # Set up attributes that determine how data will be stratified
+        if not hasattr(stratify, '__len__'):
+            stratify = [stratify]
         self.stratify_ = np.array(stratify)
         self.resample_ = ~self.stratify_ # TODO: set as needed
         self.permute_ = self.stratify_
@@ -279,7 +283,7 @@ class BaseClass():
             else:
                 raise ValueError('BDA with no stratification by condition, and no intercept.')
         return df
-    def get_design_matrix(self):
+    def get_design_matrix(self, with_covariates=True):
         """
         Get design matrix, including any covariates, as a dataframe.
 
@@ -290,10 +294,11 @@ class BaseClass():
         """
         df = self.label_frame_.copy()
         if self._has_covariates:
-            for i, cov in enumerate(self.covariate_names_):
-                df[cov] = self.covariates_[:, i]
+            if with_covariates:
+                for i, cov in enumerate(self.covariate_names_):
+                    df[cov] = self.covariates_[:, i]
         return df
-    def get_scores_frame(self, lv_idx=None):
+    def get_scores_frame(self, lv_idx=None, with_covariates=True):
         """
         Get dataframe containing design and data scores for each observation in :attr:`data_`, alongside condition information from the data labels.
 
@@ -327,7 +332,7 @@ class BaseClass():
         lv_idxs = lv_idx
         lv_subdfs = []
         for lv_idx in lv_idxs:
-            sub_df = self.get_design_matrix()
+            sub_df = self.get_design_matrix(with_covariates=with_covariates)
             sub_df['lv_idx'] = lv_idx
             sub_df['design_score'] = self.design_scores_[:, lv_idx]
             sub_df['data_score'] = self.transform(lv_idx=lv_idx)
@@ -367,24 +372,35 @@ class BaseClass():
         silent = not print_prog
         # Pre-generate perm_idx
         perms = self._get_permutations(n_perm, n_jobs, silent)
+        def get_perm_singvals(perms, desc):
+            return Parallel(n_jobs=n_jobs)(
+                delayed(self._single_permutation)(*perm, method=method)
+                for perm in tqdm(perms, desc=desc, disable=silent)
+            )
         if method == 'deflate':
             pvals = np.nan*np.array([0]*self.n_sv_)
             for component in range(self.rank_):
                 self._set_data_to_permute(method, component)
-                desc = 'Permuting comp. %s' % component
+                perm_singvals = get_perm_singvals(perms, desc='Permuting comp. %s' % component)
+                '''
                 perm_singvals = Parallel(n_jobs=n_jobs)(
-                    delayed(self._single_permutation)(*perm)
+                    delayed(self._single_permutation)(*perm, method=method)
                     for perm in tqdm(perms, desc=desc, disable=silent)
                 )
+                '''
                 # Only take the top compoment
-                null_dist = np.stack(perm_singvals)[:, 0]
+                null_dist = np.stack(perm_singvals)
+                null_dist = null_dist[:, 0]
                 pvals[component] = (np.sum(null_dist >= self.singular_vals_[component], axis=0) + 1) / (n_perm + 1)
         elif method == 'simultaneous':
             self._set_data_to_permute(method)
+            perm_singvals = get_perm_singvals(perms, desc='permuting')
+            '''
             perm_singvals = Parallel(n_jobs=n_jobs)(
                 delayed(self._single_permutation)(*perm)
                 for perm in tqdm(perms, desc='Permuting', disable=silent)
             )
+            '''
             null_dist = np.stack(perm_singvals)
             pvals = (np.sum(null_dist >= self.singular_vals_, axis=0) + 1) / (n_perm + 1)
             # Nullify p vals based on the rank of the matrix being decomposed
@@ -396,12 +412,24 @@ class BaseClass():
     def _get_permutations(self, n_perm, n_jobs, silent):
         ss = np.random.SeedSequence(self.random_state)
         child_sequences = ss.spawn(n_perm)
+        '''
         perms = Parallel(n_jobs=n_jobs)(
             delayed(utils.cluster_permute)(self.label_mat_,
                                            self.permute_,
                                            np.random.default_rng(child_seq),
                                            return_cov_perm=self._has_covariates,
                                            return_flips=self._test_intercept)
+            for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
+        )
+        '''
+        if self._has_covariates:
+            perm_func = utils._permute_covariates
+        else:
+            perm_func = utils.cluster_permute
+        perms = Parallel(n_jobs=n_jobs)(
+            delayed(perm_func)(self.label_mat_,
+                               self.permute_,
+                               np.random.default_rng(child_seq))
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -709,26 +737,31 @@ class PLSC(BaseClass):
         # Convert covariate names to array
         self.covariate_names_ = np.array(self.covariate_names_)
     def _get_design_scores(self):
-        # Initialize
-        design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
-        # Align the observations with the design saliences, level-wise
-        design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
-        stratify_labels = self.label_frame_.iloc[:, self.stratify_]
-        obs_labels = list(stratify_labels.itertuples(index=False, name=None))
-        # Loop over levels of stratifying variables
-        for curr_label in set(obs_labels):
-            # Find where the observations are at this level, and which design saliences correspond to it
-            obs_mask = [i for i, obs_label in enumerate(obs_labels) if obs_label == curr_label]
-            sal_mask = [i for i, sal_label in enumerate(design_sal_labels) if sal_label[:-1] == curr_label]
-            # Get the sub-matrices of the observed covariates and design saliences
-            obs_submat = self.covariates_[obs_mask]
-            sal_submat = self.design_sals_[sal_mask]
-            # Ensure each covariate is being multiplied by the appropriate salience
-            assert all(self.design_sal_labels_['covariate'].iloc[sal_mask] == self.covariate_names_)
-            # Multiply them to get the current design scores
-            design_scores[obs_mask] = obs_submat @ sal_submat
+        if any(self.stratify_):
+            # Scores must be computed per cond
+            # Initialize
+            design_scores = np.zeros((len(self.covariates_), self.n_sv_), dtype=self.design_sals_.dtype)
+            # Align the observations with the design saliences, level-wise
+            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+            stratify_labels = self.label_frame_.iloc[:, self.stratify_]
+            obs_labels = list(stratify_labels.itertuples(index=False, name=None))
+            # Loop over levels of stratifying variables
+            for curr_label in set(obs_labels):
+                # Find where the observations are at this level, and which design saliences correspond to it
+                obs_mask = [i for i, obs_label in enumerate(obs_labels) if obs_label == curr_label]
+                sal_mask = [i for i, sal_label in enumerate(design_sal_labels) if sal_label[:-1] == curr_label]
+                # Get the sub-matrices of the observed covariates and design saliences
+                obs_submat = self.covariates_[obs_mask]
+                sal_submat = self.design_sals_[sal_mask]
+                # Ensure each covariate is being multiplied by the appropriate salience
+                assert all(self.design_sal_labels_['covariate'].iloc[sal_mask] == self.covariate_names_)
+                # Multiply them to get the current design scores
+                design_scores[obs_mask] = obs_submat @ sal_submat
+        else:
+            # Much simpler
+            design_scores = self.covariates_ @ self.design_sals_
         return design_scores
-    def fit(self, data, covariates, labels, stratify):
+    def fit(self, data, covariates, labels=None, stratify=None):
         """
         Fit a PLSC model.
 
@@ -767,6 +800,10 @@ class PLSC(BaseClass):
         >>> mod = pyplsc.PLSC()
         >>> mod.fit(data=data, covariates=covs, stratify=stratify)
         """
+        if labels is None:
+            # Assume no stratification
+            labels = pd.DataFrame({'obs': range(len(data))})
+            stratify = [False]
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
         self._setup_labels(labels)
@@ -799,25 +836,46 @@ class PLSC(BaseClass):
             self._data_to_permute = self.data_
             self._covs_to_permute = self.covariates_
         elif method == 'deflate':
-            if component == 0:
-                self._data_to_permute = self.data_
-                self._covs_to_permute = self.covariates_
+            data = self.data_.copy()
+            covs = self.covariates_.copy()
+            # Center data within exchangeability blocks
+            if len(self.stratify_ == 1):
+                data = utils.scale(data)
+                covs = utils.scale(covs)
             else:
-                data_subtract = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
-                # data_deflated = self.transform() @ self.data_sals_[:, component:].T
-                covs_subtract = self.design_scores_[:, :component] @ self.design_sals_[:, :component].T
-                self._data_to_permute = self.data_ - data_subtract
-                self._covs_to_permute = self.covariates_ - covs_subtract
-    def _single_permutation(self, permuted_labels, cov_perm, compute_uv=False):
-        if self._permute_labels:
-            labels = permuted_labels
-        else:
-            labels = self.label_mat_
+                unique_labels, label_ids = np.unique(self.label_mat_[:, self.stratify_], axis=0, return_inverse=True)
+                for label_id in range(len(unique_labels)):
+                    mask = label_ids == label_id
+                    data[mask] = utils.scale(data[mask])
+                    covs[mask] = utils.scale(covs[mask])
+            self._covs_to_permute = covs
+            # Deflate data?
+            if component == 0:
+                self._data_to_permute = data
+            else:
+                # Deflate data
+                data_scores = data @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
+                self._data_to_permute = data - data_scores
+                
+            '''
+            # Test validity
+            R = utils.stratified_corrs(data=self._data_to_permute,
+                                       covariates=self._covs_to_permute,
+                                       labels=self.label_mat_,
+                                       stratify=self.stratify_,
+                                       z_transform=self._z_transform,
+                                       do_scale=False)
+            u, s, v = self._svd(R, compute_uv=True)
+            '''
+    def _single_permutation(self, cov_perm, method, compute_uv=False):
+        # If using deflation method, we'll already have scaled the data and can save time
+        do_scale = method != 'deflate'
         R = utils.stratified_corrs(data=self._data_to_permute,
                                    covariates=self._covs_to_permute[cov_perm],
-                                   labels=labels,
+                                   labels=self.label_mat_,
                                    stratify=self.stratify_,
-                                   z_transform=self._z_transform)
+                                   z_transform=self._z_transform,
+                                   do_scale=do_scale)
         return self._svd(R, compute_uv=compute_uv)
     def _single_resample(self, resample, alignment_method):
         # Compute stacked cormats within ptpts and then average
@@ -899,8 +957,8 @@ class BDA(BaseClass):
 
         Returns
         -------
-        self : :class:`PLSC`
-            PLSC model fit to the data provided.
+        self : :class:`BDA`
+            BDA model fit to the data provided.
         
         Examples
         --------
@@ -943,24 +1001,31 @@ class BDA(BaseClass):
             if component == 0:
                 self._data_to_permute = self.data_
             else:
-                data_subtract = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
+                data_scores = self.data_ @ self.data_sals_[:, :component] @ self.data_sals_[:, :component].T
                 # data_deflated = self.transform() @ self.data_sals_[:, component:].T
-                self._data_to_permute = self.data_ - data_subtract
-    def _single_permutation(self, permuted_labels, flips=None, compute_uv=False):
+                self._data_to_permute = self.data_ - data_scores
+        # Test validity
+        M = utils.stratified_average(self._data_to_permute,
+                                     self.label_mat_,
+                                     self.stratify_)
+        u, s, v = self._svd(M, compute_uv=True)
+    def _single_permutation(self, permuted_labels, flips=None, method=None, compute_uv=False):
         if self._test_intercept:
             # Find highest unstratify label level
             flip_level = np.where(~self.stratify_)[0][0]
             # Flip at highest unstratify level
             flip_idx = flips[permuted_labels[:, flip_level]]
             # need to copy so as not to alter original data
-            data = self.data_.copy()
+            # data = self.data_.copy()
+            data = self._data_to_permute.copy()
             # Flip signs
             # data *= flips
             # data[flips] *= -1
             data[flip_idx] *= -1
         else:
-            # Skip copying to save time
-            data = self.data_
+            # Skip copying to save resources
+            # data = self.data_
+            data = self._data_to_permute
         # data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
@@ -989,3 +1054,184 @@ class BDA(BaseClass):
             boot_stat = SM
         return boot_stat, resampled_data_sals
     
+class NRM(BaseClass):
+    """
+    Non-rotated model, used for analyzing condition-wise differences via planned contrasts.
+    
+    Parameters
+    ----------
+    boot_stat : str, optional
+        Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
+
+        - ``'condwise-scores-centred'`` (default): Mean-centred condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. This is the what is computed in the original Matlab version of PLS.
+        - ``'condwise-scores'``: Condition-wise average data (original or resampled) multiplied by :attr:`data_sals_`. 
+    random_state : int, optional
+        Random state of model for reproducible premutation and bootstrap resampling. Passed to ``numpy.random.default_rng`` internally. Default is ``None``.
+    """
+    _min_unique = 1 # For resampling
+    _has_covariates = False
+    def __init__(self, boot_stat=None, random_state=None, include_intercept=False, test_intercept=False):
+        self._include_intercept = include_intercept
+        if test_intercept and not include_intercept:
+            raise ValueError('test_intercept cannot be true if include_intercept is false')
+        self._test_intercept = test_intercept
+        super().__init__(svd_method=None, boot_stat=boot_stat, random_state=random_state)
+    def _get_design_scores(self):
+        if not any(self.stratify_):
+            design_scores = np.concat([self.design_sals_]*len(self.data_))
+        else:
+            # Align individual observations with design saliences
+            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+            design_scores = []
+            for obs_label in self.label_frame_.iloc[:, self.stratify_].itertuples(index=False, name=None):
+                idx = design_sal_labels.index(obs_label)
+                design_scores.append(self.design_sals_[idx])
+            design_scores = np.stack(design_scores)
+        return design_scores
+    def _initial_contrast(self, M):
+        norms, sals = self._apply_contrasts(M)
+        self.data_sals_ = sals
+        self.singular_vals_ = norms
+        self.n_sv_ = len(norms)
+        self._fitted = True
+    def set_data(self, data, labels, stratify):
+        """
+        Set data.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data array of shape (n. observations, n. features).
+        labels : numpy.ndarray | pd.DataFrame
+            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
+        stratify : numpy.ndarray | list
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
+
+        Returns
+        -------
+        self : :class:`NRM`
+            Model with data attached.
+        """
+        self._setup_data(data)
+        self._setup_labels(labels)
+        self._setup_stratification(stratify)
+        self.design_sal_labels_ = self._get_design_sal_labels()
+        return self
+    def set_contrasts(self, contrasts, normalize=True):
+        """
+        Set contrasts to evaluate.
+
+        Parameters
+        ----------
+        contrasts : numpy.ndarray
+            Array of shape (n. features, n. contrasts).
+        normalize : bool
+            Specifies whether the contrasts should be divided by their norm.
+
+        Returns
+        -------
+        self : :class:`NRM`
+            Model with contrasts set.
+        """
+        if self.data_ is None:
+            raise ValueError('Data must be set with the set_data method before contrasts can be set')
+        if isinstance(contrasts, pd.DataFrame) or isinstance(contrasts, pd.Series):
+            contrasts = contrasts.to_numpy()
+        elif isinstance(contrasts, list):
+            contrasts = np.array(contrasts).reshape((-1, 1))
+        # Cast to float
+        contrasts = np.float64(contrasts)
+        n_contrs = len(contrasts)
+        n_conds = len(self.design_sal_labels_)
+        if n_contrs != n_conds:
+            raise ValueError('Number of values in contrasts (%s) does not match the number of condition-wise averages (%s)' % (n_contrs, n_conds))
+        if normalize:
+            norms = np.linalg.norm(contrasts, axis=0)
+            contrasts /= norms
+        self.contrasts = contrasts
+        self.design_sals_ = contrasts
+        return self
+    def fit(self):
+        """
+        Fit an NRM model; i.e., apply contrasts to compute norms and data saliences.
+
+        Returns
+        -------
+        self : :class:`NRM`
+            NRM model after fitting.
+        
+        """
+        if self.data_ is None:
+            raise ValueError('Data must be set with the set_data method before fit() can be called')
+        if self.design_sals_ is None:
+            raise ValueError('Contrasts must be set with the set_contrasts method before fit() can be called')
+        # Compute within-participant stacked correlation matrices
+        M = utils.stratified_average(self.data_,
+                                     self.label_mat_,
+                                     self.stratify_)
+        if not self._include_intercept:
+            M = utils.mean_center(M)
+        self.rank_ = np.linalg.matrix_rank(M)
+        self._initial_contrast(M)
+        self.design_scores_ = self._get_design_scores()
+        # Compute boot stat
+        scores = self.transform()
+        SM = utils.stratified_average(scores,
+                                      self.label_mat_,
+                                      self.stratify_)
+        if self.boot_stat == 'condwise-scores-centred':
+            self.boot_stat_val_ = utils.mean_center(SM)
+        elif self.boot_stat == 'condwise-scores':
+            self.boot_stat_val_ = SM
+        return self
+    def _apply_contrasts(self, M, return_contrasts=True):
+        contrs = M.T @ self.contrasts
+        norms = np.linalg.norm(contrs, axis=0).flatten()
+        if return_contrasts:
+            return norms, contrs/norms
+        else:
+            return norms
+    def _set_data_to_permute(self, method, component=None):
+        # Not applicable to NRMs
+        self._data_to_permute = self.data_
+    def _single_permutation(self, permuted_labels, flips=None, **kwargs):
+        if self._test_intercept:
+            # Find highest unstratify label level
+            flip_level = np.where(~self.stratify_)[0][0]
+            # Flip at highest unstratify level
+            flip_idx = flips[permuted_labels[:, flip_level]]
+            # need to copy so as not to alter original data
+            data = self.data_.copy()
+            # Flip signs
+            # data *= flips
+            # data[flips] *= -1
+            data[flip_idx] *= -1
+        else:
+            # Skip copying to save time
+            data = self.data_
+        # data = self.data_
+        M = utils.stratified_average(data,
+                                     permuted_labels,
+                                     self.stratify_)
+        if not self._include_intercept:
+            M = utils.mean_center(M)
+        return self._apply_contrasts(M, return_contrasts=False)
+    def _single_resample(self, resample, alignment_method):
+        # Compute stacked cormats within ptpts and then average
+        resampled_data = self.data_[resample]
+        resampled_label_mat_ = self.label_mat_[resample]
+        M = utils.stratified_average(resampled_data,
+                                     resampled_label_mat_,
+                                     self.stratify_)
+        if not self._include_intercept:
+            M = utils.mean_center(M)
+        norms, resampled_data_sals = self._apply_contrasts(M)
+        scores = self.transform(resampled_data)
+        SM = utils.stratified_average(scores,
+                                      resampled_label_mat_,
+                                      self.stratify_)
+        if self.boot_stat == 'condwise-scores-centred':
+            boot_stat = utils.mean_center(SM)
+        elif self.boot_stat == 'condwise-scores':
+            boot_stat = SM
+        return boot_stat, resampled_data_sals
