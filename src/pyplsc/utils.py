@@ -314,3 +314,47 @@ def cluster_resample(labels, resample, rng):
             obs_id = obs_id[np.concatenate(resampled_rows)]
 
     return obs_id
+
+def _standardize_labels(labels):
+    # Convert various inputs to dataframe
+    if isinstance(labels, np.ndarray):
+        labels = pd.DataFrame(labels)
+        labels.columns = ['label_%s' % i for i in range(len(labels.columns))]
+    elif isinstance(labels, pd.Series):
+        labels = pd.DataFrame(labels)
+    elif isinstance(labels, list):
+        labels = pd.DataFrame(labels)
+        labels.columns = ['label']
+    elif not isinstance(labels, pd.DataFrame):
+        raise ValueError('Data labels must be pandas DataFrame or numpy array')
+    # Convert columns to categorical
+    for col in labels.columns:
+        labels[col] = pd.Categorical(labels[col])
+    # Store frame
+    label_frame = labels
+    # Create numpy array of integer codes
+    mat_cols = [labels[col].cat.codes for col in labels.columns]
+    label_mat = np.stack(mat_cols).T
+    return label_frame, label_mat
+
+def get_conditions(labels, stratify=None):
+    label_frame, label_mat = _standardize_labels(labels)
+    if stratify is None:
+        # Assume each column is used to stratify
+        stratify = [True]*len(label_frame.columns)
+    if any(stratify):
+        # Stratify the same way as when computing the matrix to factorize
+        stratify_labels = label_frame.iloc[:, stratify]
+        label_sets, label_ids = np.unique(label_mat[:, stratify], axis=0, return_inverse=True)
+        rows = []
+        for label_set in label_sets:
+            # Create row
+            row = []
+            for col_idx, cat_idx in enumerate(label_set):
+                cat = stratify_labels.iloc[:, col_idx].cat.categories[cat_idx]
+                row.append(cat)
+            rows.append(row)
+        df = pd.DataFrame(rows)
+        colnames = label_frame.columns[stratify]
+        df.columns = colnames
+    return df

@@ -79,7 +79,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     # Set up bar positions and hues
     nhue = mapping_counts['hue']
     slot_width = bar_width / max(nhue, 1)
-    x_base = np.arange(mapping_counts['hue']) * (1 + group_gap)
+    x_base = np.arange(mapping_counts['x']) * (1 + group_gap)
     cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     color_map = {h: cycle[i % len(cycle)] for i, h in enumerate(mapping_levels['hue'])}
     

@@ -109,22 +109,9 @@ class BaseClass():
             raise ValueError('data must be a 1- or 2-dimensional numpy array')
         self.data_ = data
     def _setup_labels(self, labels):
-        # Convert to dataframe
-        if isinstance(labels, np.ndarray):
-            labels = pd.DataFrame(labels)
-            labels.columns = ['label_%s' % i for i in range(len(labels.columns))]
-        elif isinstance(labels, pd.Series):
-            labels = pd.DataFrame(labels)
-        elif not isinstance(labels, pd.DataFrame):
-            raise ValueError('Data labels must be pandas DataFrame or numpy array')
-        # Convert columns to categorical
-        for col in labels.columns:
-            labels[col] = pd.Categorical(labels[col])
-        # Store frame
-        self.label_frame_ = labels
-        # Create numpy array of integer codes
-        mat_cols = [labels[col].cat.codes for col in labels.columns]
-        self.label_mat_ = np.stack(mat_cols).T
+        label_frame, label_mat = utils._standardize_labels(labels)
+        self.label_frame_ = label_frame
+        self.label_mat_ = label_mat
         # Check that each observation can be uniquely identified
         unique_clusters = np.unique(self.label_mat_, axis=0)
         if len(unique_clusters) < len(labels):
@@ -249,39 +236,26 @@ class BaseClass():
         return data_scores
     def _get_design_sal_labels(self):
         if any(self.stratify_):
-            # Stratify the same way as when computing the matrix to factorize
-            stratify_labels = self.label_frame_.iloc[:, self.stratify_]
-            label_sets, label_ids = np.unique(self.label_mat_[:, self.stratify_], axis=0, return_inverse=True)
-            rows = []
-            for label_set in label_sets:
-                # Create row
-                row = []
-                for col_idx, cat_idx in enumerate(label_set):
-                    cat = stratify_labels.iloc[:, col_idx].cat.categories[cat_idx]
-                    row.append(cat)
-                if self._has_covariates:
-                    # Add extra column for covariate
-                    row.append(None) # Placeholder
-                    for cov_name in self.covariate_names_:
-                        row = row.copy()
-                        row[-1] = cov_name
-                        rows.append(row)
-                else:
-                    rows.append(row)
-            df = pd.DataFrame(rows)
-            colnames = self.label_frame_.columns[self.stratify_]
+            df = utils.get_conditions(self.label_frame_, self.stratify_)
             if self._has_covariates:
-                colnames = colnames.to_list()
-                colnames.append('covariate')
-            df.columns = colnames
-                
+                subtables = []
+                for i, row in df.iterrows():
+                    subtable = []
+                    for cov in self.covariate_names_:
+                        row = row.copy()
+                        row['covariate'] = cov
+                        subtable.append(row.to_frame().T)
+                    subtable = pd.concat(subtable)
+                    subtables.append(subtable)
+                df = pd.concat(subtables)
+                df = df.reset_index(drop=True)
         else:
             if self._has_covariates:
                 df = pd.DataFrame({'covariate': self.covariate_names_})
             elif self._include_intercept:
                 df = pd.DataFrame({'Placeholder': ['(Intercept)']})
             else:
-                raise ValueError('BDA with no stratification by condition, and no intercept.')
+                raise ValueError('No stratification by condition, and no intercept.')
         return df
     def get_design_matrix(self, with_covariates=True):
         """
@@ -1085,48 +1059,7 @@ class NRM(BaseClass):
             raise ValueError('test_intercept cannot be true if include_intercept is false')
         self._test_intercept = test_intercept
         super().__init__(svd_method=None, boot_stat=boot_stat, random_state=random_state)
-    def _get_design_scores(self):
-        if not any(self.stratify_):
-            design_scores = np.concat([self.design_sals_]*len(self.data_))
-        else:
-            # Align individual observations with design saliences
-            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
-            design_scores = []
-            for obs_label in self.label_frame_.iloc[:, self.stratify_].itertuples(index=False, name=None):
-                idx = design_sal_labels.index(obs_label)
-                design_scores.append(self.design_sals_[idx])
-            design_scores = np.stack(design_scores)
-        return design_scores
-    def _initial_contrast(self, M):
-        norms, sals = self._apply_contrasts(M)
-        self.data_sals_ = sals
-        self.singular_vals_ = norms
-        self.n_sv_ = len(norms)
-        self._fitted = True
-    def set_data(self, data, labels, stratify):
-        """
-        Set data.
-
-        Parameters
-        ----------
-        data : numpy.ndarray
-            Data array of shape (n. observations, n. features).
-        labels : numpy.ndarray | pd.DataFrame
-            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        stratify : numpy.ndarray | list
-            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
-
-        Returns
-        -------
-        self : :class:`NRM`
-            Model with data attached.
-        """
-        self._setup_data(data)
-        self._setup_labels(labels)
-        self._setup_stratification(stratify)
-        self.design_sal_labels_ = self._get_design_sal_labels()
-        return self
-    def set_contrasts(self, contrasts, normalize=True):
+    def _setup_contrasts(self, contrasts, normalize):
         """
         Set contrasts to evaluate.
 
@@ -1147,7 +1080,11 @@ class NRM(BaseClass):
         if isinstance(contrasts, pd.DataFrame) or isinstance(contrasts, pd.Series):
             contrasts = contrasts.to_numpy()
         elif isinstance(contrasts, list):
-            contrasts = np.array(contrasts).reshape((-1, 1))
+            # Single-level or nested list?
+            if isinstance(contrasts[0], list):
+                contrasts = np.array(contrasts).T
+            else:
+                contrasts = np.array(contrasts).reshape((-1, 1))
         # Cast to float
         contrasts = np.float64(contrasts)
         n_contrs = len(contrasts)
@@ -1159,21 +1096,57 @@ class NRM(BaseClass):
             contrasts /= norms
         self.contrasts = contrasts
         self.design_sals_ = contrasts
-        return self
-    def fit(self):
+    def _get_design_scores(self):
+        if not any(self.stratify_):
+            design_scores = np.concat([self.design_sals_]*len(self.data_))
+        else:
+            # Align individual observations with design saliences
+            design_sal_labels = list(self.design_sal_labels_.itertuples(index=False, name=None))
+            design_scores = []
+            for obs_label in self.label_frame_.iloc[:, self.stratify_].itertuples(index=False, name=None):
+                idx = design_sal_labels.index(obs_label)
+                design_scores.append(self.design_sals_[idx])
+            design_scores = np.stack(design_scores)
+        return design_scores
+    def _initial_contrast(self, M):
+        norms, sals = self._apply_contrasts(M)
+        self.data_sals_ = sals
+        self.singular_vals_ = norms
+        self.n_sv_ = len(norms)
+        self._fitted = True
+    def fit(self, data=None, labels=None, stratify=None, contrasts=None, normalize=True):
         """
         Fit an NRM model; i.e., apply contrasts to compute norms and data saliences.
-
+        
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data array of shape (n. observations, n. features).
+        labels : numpy.ndarray | pd.DataFrame
+            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
+        stratify : numpy.ndarray | list
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
+        contrasts : numpy.ndarray
+            Array of shape (n. features, n. contrasts).
+        normalize : bool
+            Specifies whether the contrasts should be divided by their norm. Default is True.
+        
         Returns
         -------
         self : :class:`NRM`
             NRM model after fitting.
         
         """
-        if self.data_ is None:
-            raise ValueError('Data must be set with the set_data method before fit() can be called')
-        if self.design_sals_ is None:
-            raise ValueError('Contrasts must be set with the set_contrasts method before fit() can be called')
+        self._setup_data(data)
+        self._setup_labels(labels)
+        self._setup_stratification(stratify)
+        self.design_sal_labels_ = self._get_design_sal_labels()
+        self._setup_contrasts(contrasts, normalize)
+        # Check if any contrasts sum to greater than 0
+        if not self._test_intercept:
+            contrast_sums = self.design_sals_.sum(axis=0)
+            if any(contrast_sums > 0):
+                raise Warning('Contrasts do not sum to 0, but test_intercept is False')
         # Compute within-participant stacked correlation matrices
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,

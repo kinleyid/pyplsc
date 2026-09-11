@@ -51,9 +51,7 @@ def fit_plsc(sample_data):
 def fit_nrm(sample_data):
     data, _, labels, stratify = sample_data
     nrm = pyplsc.NRM(random_state=123)
-    nrm.set_data(data=data, labels=labels, stratify=stratify)
-    nrm.set_contrasts([1,2,3,4])
-    nrm.fit()
+    nrm.fit(data=data, labels=labels, stratify=stratify, contrasts=[-1, 1, 0, 0])
     return nrm
 
 @pytest.fixture
