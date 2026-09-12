@@ -161,6 +161,73 @@ def _permute_covariates(labels, permute, rng):
             cov_perm[mask] = cov_perm[mask][perm]
     return (cov_perm,)
 
+def _permute_labels(labels, permute, rng, return_cov_perm=False, return_flips=False):
+    permuted_labels = labels.copy()
+    n_obs, n_levels = labels.shape
+
+    # Vectorized row comparisons
+    def rows_equal(arr, row):
+        return np.all(arr == row, axis=1)
+
+    # Permute values within groups
+    def permute_level_within_groups(parent_cols, level_col, child_col=None):
+        """
+        For every unique combination in parent_cols, shuffle the label in
+        level_col (and, when child_col is provided, track its grouping too).
+        Returns updated level_col.
+        """
+        result = level_col.copy()
+        unique_parents, parent_inv = np.unique(parent_cols, axis=0, return_inverse=True)
+        for idx in range(len(unique_parents)):
+            mask = parent_inv == idx
+            if child_col is None:
+                # Lowest level of labels: shuffle individual observations
+                result[mask] = rng.permutation(level_col[mask])
+            else:
+                # Shuffle child-cluster labels
+                sub = np.stack([level_col[mask], child_col[mask]], axis=1)
+                unique_sub, sub_inv = np.unique(sub, axis=0, return_inverse=True)
+                unique_vals = unique_sub[:, 0]
+                perm = rng.permutation(len(unique_vals))
+                result[mask] = unique_vals[perm][sub_inv]
+        return result
+
+    # Level 0 (special case, cannot have a parent level)
+    if permute[0]:
+        if n_levels == 1:
+            depth = 1
+        else:
+            depth = 2 # Labels at this level apply to a child level
+        clusters = labels[:, :depth]
+        unique_clusters, inv = np.unique(clusters, axis=0, return_inverse=True)
+        perm = rng.permutation(len(unique_clusters))
+        permuted_labels[:, 0] = unique_clusters[perm, 0][inv]   # vectorized remap
+
+    # Remaining levels, if any
+    if n_levels > 1:
+        for level in range(1, n_levels):
+            if permute[level]:
+                parent_cols = labels[:, :level] # Observations are not just stratified by the immediate parent level but by all "ancestor" levels (in case of, e.g., repeated condition labels within some higher level of labels)
+                # Is there a child level?
+                if (level + 1) < n_levels:
+                    child_col = labels[:, level + 1]
+                else:
+                    child_col = None
+                permuted_labels[:, level] = permute_level_within_groups(
+                    parent_cols, labels[:, level], child_col
+                )
+
+    out = (permuted_labels,)
+    
+    # Flip to model baseline?
+    if return_flips:
+        # flips = rng.choice([-1, 1], len(permuted_labels))
+        flips = rng.random(len(permuted_labels)) < 0.5
+        out += (flips,)
+
+    return out
+
+'''
 def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=False):
     permuted_labels = labels.copy()
     n_obs, n_levels = labels.shape
@@ -241,7 +308,7 @@ def cluster_permute(labels, permute, rng, return_cov_perm=False, return_flips=Fa
         out += (flips,)
 
     return out
-
+'''
 '''
 def cluster_permute_index(labels, permute, rng, return_flips=False):
     """

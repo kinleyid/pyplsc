@@ -408,7 +408,7 @@ class BaseClass():
         if self._has_covariates:
             perm_func = utils._permute_covariates
         else:
-            perm_func = utils.cluster_permute
+            perm_func = utils._permute_labels
         perms = Parallel(n_jobs=n_jobs)(
             delayed(perm_func)(self.label_mat_,
                                self.permute_,
