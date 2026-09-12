@@ -1,6 +1,7 @@
 
 import numpy as np
 import pandas as pd
+import itertools
 
 from pdb import set_trace
 
@@ -37,15 +38,28 @@ def mean_center(matrix):
     out = matrix - matrix.mean(axis=0)
     return out
 
-def stratified_average(data, labels, stratify):
-    '''
-    # Subtract baseline
-    data = data.copy()
-    # Sort to make sure they align
-    data[labels[:, -1] == 0] -= data[labels[:, -1] == 1]
-    data[labels[:, -1] == 1] -= data[labels[:, -1] == 1]
-    '''
-    # Stack the effect matrices
+def mean_within_labels(data, labels, keep_shape=False):
+    unique_labels, label_ids = np.unique(labels, axis=0, return_inverse=True)
+    Ms = []
+    for label_id in range(len(unique_labels)):
+        mask = label_ids == label_id
+        M = data[mask].mean(axis=0)
+        Ms.append(M)
+    out = np.stack(Ms)
+    if keep_shape:
+        out = out[label_ids]
+    return out
+
+def get_combinations(elements, up_to=None):
+    combos = []
+    if up_to is None:
+        up_to = len(elements)
+    for r in range(1, up_to + 1):
+        combos.extend(itertools.combinations(elements, r))
+    return combos
+
+def stratified_average(data, labels, stratify, effects='all'):
+    # Average over levels not used to stratify
     while any(~stratify):
         if len(stratify) == 1:
             # No more hierarchical structure
@@ -53,7 +67,7 @@ def stratified_average(data, labels, stratify):
             data = data.mean(axis=0, keepdims=True)
             break
         else:
-            # Find lowest unstratify level to average over
+            # Find lowest unstratified level to average over
             avg_level = np.where(~stratify)[0][-1]
             # Stratify by all but the level at which averages are taken
             curr_stratify = np.array([True]*len(stratify))
@@ -69,12 +83,27 @@ def stratified_average(data, labels, stratify):
             # Create new, smaller labels matrix and stratify indicator
             labels = np.stack(unique_labels)
             stratify = stratify[curr_stratify]
-    '''
-    baseline_idx = labels[:, -1].astype(bool)
-    data = np.concat((data[~baseline_idx],
-                      data[baseline_idx].mean(axis=0, keepdims=True)))
-    '''
-    # data = data.mean(axis=0, keepdims=True)
+    
+    # Apply effects
+    if effects != 'all':
+        intercept = data.mean(axis=0)
+        demeaned = data - intercept
+        # Compute all possible effects
+        all_effects = get_combinations(range(len(stratify)))
+        all_effects = [tuple(sorted(e)) for e in all_effects]
+        effect_mats = {}
+        for effect in all_effects:
+            effect_mat = mean_within_labels(demeaned,
+                                            labels[:, list(effect)],
+                                            keep_shape=True)
+            if len(effect) > 1:
+                # Interaction---need to subtract simpler effects
+                simpler_effects = get_combinations(effect, up_to=len(effect) - 1)
+                effect_mat -= sum(effect_mats[e] for e in simpler_effects)
+            effect_mats[effect] = effect_mat
+        
+        data = sum(effect_mats[e] for e in effects) + intercept
+    
     return data
 
 def stratified_corrs(data, covariates, labels, stratify, z_transform=True, do_scale=True):

@@ -936,7 +936,28 @@ class BDA(BaseClass):
                 design_scores.append(self.design_sals_[idx])
             design_scores = np.stack(design_scores)
         return design_scores
-    def fit(self, data, labels, stratify):
+    def _setup_effects(self, effects=None, rm_effects=None):
+        if effects is None and rm_effects is None:
+            self.effects_ = 'all'
+        else:
+            columns = list(self.label_frame_.columns[self.stratify_])
+            def str_to_idx(effects, columns):
+                # Parse effects specified as strings into sets containing column indices
+                idx = []
+                if isinstance(effects, str):
+                    effects = [effects]
+                for effect in effects:
+                    idx.append([columns.index(e) for e in effect.split(':')])
+                idx = [tuple(sorted(i)) for i in idx]
+                return idx
+            if effects is not None:
+                self.effects_ = str_to_idx(effects, columns)
+            elif rm_effects is not None: # Guaranteed but helpful to explicitly state
+                rm_effects = str_to_idx(rm_effects, columns)
+                all_effects = utils.get_combinations(range(len(columns)))
+                self.effects_ = list(set(all_effects) - set(rm_effects))
+                
+    def fit(self, data, labels, stratify, effects=None, rm_effects=None):
         """
         Fit a BDA model.
 
@@ -944,12 +965,14 @@ class BDA(BaseClass):
         ----------
         data : numpy.ndarray
             Data array of shape (n. observations, n. features).
-        covariates : numpy.ndarray | pd.DataFrame
-            Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
         stratify : numpy.ndarray | list of bool | list of str
             Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``). Alternatively, a list of strings specifying the columns in ``labels`` used to stratify the data.
+        effects : str | list of str
+            Specifies the effects to be included in the model by naming columns in ``labels``. E.g. suppose labels included columns "between" and "within". To only examine the interaction between these, specify ``include_effects='between:within'``. To include the main effect of ``between`` and the interaction, specify ``include_effects=['between', 'between:within']``. Default is to include all effects.
+        rm_effects : str | list of str
+            Specifies the effects to be excluded from the model, using the same syntax as ``include_effects``. Note that ``include_effects`` and ``rm_effects`` cannot both be specified. E.g. to remove the main effect of ``between``, specify ``rm_effects='between'``.
 
         Returns
         -------
@@ -967,13 +990,17 @@ class BDA(BaseClass):
         >>> mod = pyplsc.WPLSC()
         >>> mod.fit(data=data, covariates=covs, weighted=True)
         """
+        if effects is not None and rm_effects is not None:
+            raise ValueError('Only one of include_effects and rm_effects may be specified, not both')
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
         self._setup_labels(labels)
         self._setup_stratification(stratify)
+        self._setup_effects(effects, rm_effects)
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
-                                     self.stratify_)
+                                     self.stratify_,
+                                     self.effects_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         self.rank_ = np.linalg.matrix_rank(M)
@@ -984,7 +1011,8 @@ class BDA(BaseClass):
         scores = self.transform()
         SM = utils.stratified_average(scores,
                                       self.label_mat_,
-                                      self.stratify_)
+                                      self.stratify_,
+                                      self.effects_)
         if self.boot_stat == 'condwise-scores-centred':
             self.boot_stat_val_ = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
@@ -1003,11 +1031,13 @@ class BDA(BaseClass):
                 # data_deflated = self.transform() @ self.data_sals_[:, component:].T
                 self._data_to_permute = self.data_ - data_scores
             """
+        """
         # Test validity
         M = utils.stratified_average(self._data_to_permute,
                                      self.label_mat_,
                                      self.stratify_)
         u, s, v = self._svd(M, compute_uv=True)
+        """
     def _single_permutation(self, permuted_labels, flips=None, method=None, compute_uv=False):
         if self._test_intercept:
             # Find highest unstratify label level
@@ -1028,7 +1058,8 @@ class BDA(BaseClass):
         # data = self.data_
         M = utils.stratified_average(data,
                                      permuted_labels,
-                                     self.stratify_)
+                                     self.stratify_,
+                                     self.effects_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         return self._svd(M, compute_uv=compute_uv)
@@ -1038,7 +1069,8 @@ class BDA(BaseClass):
         resampled_label_mat_ = self.label_mat_[resample]
         M = utils.stratified_average(resampled_data,
                                      resampled_label_mat_,
-                                     self.stratify_)
+                                     self.stratify_,
+                                     self.effects_)
         if not self._include_intercept:
             M = utils.mean_center(M)
         u, s, v = self._svd(M)
@@ -1046,7 +1078,8 @@ class BDA(BaseClass):
         scores = self.transform(resampled_data)
         SM = utils.stratified_average(scores,
                                       resampled_label_mat_,
-                                      self.stratify_)
+                                      self.stratify_,
+                                      self.effects_)
         if self.boot_stat == 'condwise-scores-centred':
             boot_stat = utils.mean_center(SM)
         elif self.boot_stat == 'condwise-scores':
