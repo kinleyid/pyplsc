@@ -169,13 +169,15 @@ def test_bda_rng(fit_bda):
     pvals_2 = bda.pvals_
     assert all(np.isclose(pvals_1, pvals_2))
 
-'''
 def test_bda_effects(sample_data):
     data, covariates, labels, stratify = sample_data
     bda = pyplsc.BDA()
     bda.fit(data=data, labels=labels,
-            effects={'interaction'})
-'''
+            stratify=['between', 'within'],
+            effects=['between'])
+    bda.fit(data=data, labels=labels,
+            stratify=['between', 'within'],
+            rm_effects=['between'])
 
 def test_bda_input(sample_data):
     data, _, labels, stratify = sample_data

@@ -48,7 +48,7 @@ def mean_within_labels(data, labels, keep_shape=False):
     out = np.stack(Ms)
     if keep_shape:
         out = out[label_ids]
-    return out
+    return out, unique_labels, label_ids
 
 def get_combinations(elements, up_to=None):
     combos = []
@@ -72,14 +72,8 @@ def stratified_average(data, labels, stratify, effects='all'):
             # Stratify by all but the level at which averages are taken
             curr_stratify = np.array([True]*len(stratify))
             curr_stratify[avg_level] = False
-            unique_labels, label_ids = np.unique(labels[:, curr_stratify], axis=0, return_inverse=True)
-            Ms = []
-            for label_id in range(len(unique_labels)):
-                mask = label_ids == label_id
-                M = data[mask].mean(axis=0)
-                Ms.append(M)
-            
-            data = np.stack(Ms)
+            data, unique_labels, label_ids = mean_within_labels(data,
+                                                                labels[:, curr_stratify])
             # Create new, smaller labels matrix and stratify indicator
             labels = np.stack(unique_labels)
             stratify = stratify[curr_stratify]
@@ -93,9 +87,9 @@ def stratified_average(data, labels, stratify, effects='all'):
         all_effects = [tuple(sorted(e)) for e in all_effects]
         effect_mats = {}
         for effect in all_effects:
-            effect_mat = mean_within_labels(demeaned,
-                                            labels[:, list(effect)],
-                                            keep_shape=True)
+            effect_mat, *_ = mean_within_labels(demeaned,
+                                                labels[:, list(effect)],
+                                                keep_shape=True)
             if len(effect) > 1:
                 # Interaction---need to subtract simpler effects
                 simpler_effects = get_combinations(effect, up_to=len(effect) - 1)
