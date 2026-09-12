@@ -7,6 +7,7 @@ from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 import os, pathlib
 import lzma, pickle
+import copy
 
 from . import utils, viz
 
@@ -118,8 +119,13 @@ class BaseClass():
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, stratify):
         # Set up attributes that determine how data will be stratified
+        if isinstance(stratify, str):
+            stratify = [stratify]
         if not hasattr(stratify, '__len__'):
             stratify = [stratify]
+        # Convert to list of logicals
+        if isinstance(stratify[0], str):
+            stratify = [col in stratify for col in self.label_frame_.columns]
         self.stratify_ = np.array(stratify)
         self.resample_ = ~self.stratify_ # TODO: set as needed
         self.permute_ = self.stratify_
@@ -203,7 +209,7 @@ class BaseClass():
         if self._boot_done:
             self.data_sals_z_[:, lv_idx] *= -1
             self.boot_stat_ci_[..., lv_idx] *= -1
-            self.boot_stat_ci_ = self.boot_stat_ci_[(1, 0), ...]
+            self.boot_stat_ci_[..., lv_idx] = self.boot_stat_ci_[..., lv_idx][[1, 0], ...]
     def transform(self, data=None, lv_idx=None):
         """
         Compute data scores, i.e., coordinates of array data in the new basis defined by the latent variables, by multiplying a data array by the data saliences (the :attr:`data_sals_` property)
@@ -620,6 +626,16 @@ class BaseClass():
         yerr = np.array([ci[1] - est,
                          est - ci[0]])
         return yerr
+    def copy(self):
+        """
+        Create a deep copy.
+
+        Returns
+        -------
+        copy
+            Copied model of the same type.
+        """
+        return copy.deepcopy(self)
     def save(self, path):
         """
         Save a model to .xz using the LZMA algorithm. This is a thin wrapper around python's ``lzma`` library.
@@ -750,8 +766,8 @@ class PLSC(BaseClass):
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        stratify : numpy.ndarray | list
-            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
+        stratify : numpy.ndarray | list of bool | list of str
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``). Alternatively, a list of strings specifying the columns in ``labels`` used to stratify the data.
 
         Returns
         -------
@@ -932,8 +948,8 @@ class BDA(BaseClass):
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        stratify : numpy.ndarray | list
-            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
+        stratify : numpy.ndarray | list of bool | list of str
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``). Alternatively, a list of strings specifying the columns in ``labels`` used to stratify the data.
 
         Returns
         -------
@@ -1060,21 +1076,7 @@ class NRM(BaseClass):
         self._test_intercept = test_intercept
         super().__init__(svd_method=None, boot_stat=boot_stat, random_state=random_state)
     def _setup_contrasts(self, contrasts, normalize):
-        """
-        Set contrasts to evaluate.
-
-        Parameters
-        ----------
-        contrasts : numpy.ndarray
-            Array of shape (n. features, n. contrasts).
-        normalize : bool
-            Specifies whether the contrasts should be divided by their norm.
-
-        Returns
-        -------
-        self : :class:`NRM`
-            Model with contrasts set.
-        """
+        # Set contrasts to evaluate.
         if self.data_ is None:
             raise ValueError('Data must be set with the set_data method before contrasts can be set')
         if isinstance(contrasts, pd.DataFrame) or isinstance(contrasts, pd.Series):
@@ -1116,7 +1118,7 @@ class NRM(BaseClass):
         self._fitted = True
     def fit(self, data=None, labels=None, stratify=None, contrasts=None, normalize=True):
         """
-        Fit an NRM model; i.e., apply contrasts to compute norms and data saliences.
+        Fit an NRM.
         
         Parameters
         ----------
@@ -1124,10 +1126,10 @@ class NRM(BaseClass):
             Data array of shape (n. observations, n. features).
         labels : numpy.ndarray | pd.DataFrame
             Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
-        stratify : numpy.ndarray | list
-            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``).
-        contrasts : numpy.ndarray
-            Array of shape (n. features, n. contrasts).
+        stratify : numpy.ndarray | list of bool | list of str
+            Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``). Alternatively, a list of strings specifying the columns in ``labels`` used to stratify the data.
+        contrasts : numpy.ndarray | list | list of lists
+            Array of shape (n. features, n. contrasts), or list of length (n. features), or list of length (n. contrasts) of lists of length (n. features).
         normalize : bool
             Specifies whether the contrasts should be divided by their norm. Default is True.
         
