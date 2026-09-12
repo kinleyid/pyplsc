@@ -9,4 +9,4 @@ API
 
    PLSC
    BDA
-   WPLSC
+   NRM

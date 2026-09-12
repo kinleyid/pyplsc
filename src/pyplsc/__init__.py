@@ -119,14 +119,7 @@ class BaseClass():
             raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
     def _setup_stratification(self, stratify):
         # Set up attributes that determine how data will be stratified
-        if isinstance(stratify, str):
-            stratify = [stratify]
-        if not hasattr(stratify, '__len__'):
-            stratify = [stratify]
-        # Convert to list of logicals
-        if isinstance(stratify[0], str):
-            stratify = [col in stratify for col in self.label_frame_.columns]
-        self.stratify_ = np.array(stratify)
+        self.stratify_ = utils._standardize_stratify(stratify, self.label_frame_)
         self.resample_ = ~self.stratify_ # TODO: set as needed
         self.permute_ = self.stratify_
     def _svd(self, M, compute_uv=True):
@@ -168,7 +161,8 @@ class BaseClass():
         
         Examples
         --------
-        >>> mod.summary()
+        >>> df = mod.summary()
+        >>> df.to_csv('summary.csv')
         """
         df = pd.DataFrame({
             'LV index': range(self.n_sv_),
@@ -195,7 +189,7 @@ class BaseClass():
         --------
         >>> mod.flip_signs() # Flip all signs
         >>> mod.flip_signs(0) # Flip signs for the first latent variable
-        >>> mod.flip_signs([0, 1]) # Flip signs for the first two   latent variables
+        >>> mod.flip_signs([0, 1]) # Flip signs for the first two latent variables
 
         """
         if not self._fitted:
@@ -242,7 +236,7 @@ class BaseClass():
         return data_scores
     def _get_design_sal_labels(self):
         if any(self.stratify_):
-            df = utils.get_conditions(self.label_frame_, self.stratify_)
+            df = utils.get_levels(self.label_frame_, self.stratify_)
             if self._has_covariates:
                 subtables = []
                 for i, row in df.iterrows():
@@ -504,6 +498,7 @@ class BaseClass():
             M2 += (resampled_data_sals - old_mean) * (resampled_data_sals - mean)
         # Compute standard deviations for data saliences to get bootstrap ratios
         std_data_sals = np.sqrt(M2 / (n_boot - 1))
+        # self.data_sals_z_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
         self.data_sals_z_ = (self.data_sals_ @ np.diag(self.singular_vals_)) / std_data_sals
         self.data_sals_std_ = std_data_sals
         # Compute confidence intervals for design saliences
@@ -1177,11 +1172,6 @@ class NRM(BaseClass):
         self._setup_stratification(stratify)
         self.design_sal_labels_ = self._get_design_sal_labels()
         self._setup_contrasts(contrasts, normalize)
-        # Check if any contrasts sum to greater than 0
-        if not self._test_intercept:
-            contrast_sums = self.design_sals_.sum(axis=0)
-            if any(contrast_sums > 0):
-                raise Warning('Contrasts do not sum to 0, but test_intercept is False')
         # Compute within-participant stacked correlation matrices
         M = utils.stratified_average(self.data_,
                                      self.label_mat_,
@@ -1243,7 +1233,8 @@ class NRM(BaseClass):
         if not self._include_intercept:
             M = utils.mean_center(M)
         # Apply contrasts
-        norms, resampled_data_sals = self._apply_contrasts(M)
+        _, resampled_data_sals = self._apply_contrasts(M)
+        resampled_data_sals @= np.diag(self.singular_vals_)
         # Compute boot stat
         scores = self.transform(resampled_data)
         SM = utils.stratified_average(scores,

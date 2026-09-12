@@ -427,8 +427,21 @@ def _standardize_labels(labels):
     label_mat = np.stack(mat_cols).T
     return label_frame, label_mat
 
-def get_conditions(labels, stratify=None):
+def _standardize_stratify(stratify, label_frame):
+    if stratify is None:
+        stratify = [False]*len(label_frame.columns)
+    if isinstance(stratify, str):
+        stratify = [stratify]
+    if not hasattr(stratify, '__len__'):
+        stratify = [stratify]
+    # Convert to list of logicals
+    if isinstance(stratify[0], str):
+        stratify = [col in stratify for col in label_frame.columns]
+    return np.array(stratify)
+
+def get_levels(labels, stratify=None):
     label_frame, label_mat = _standardize_labels(labels)
+    stratify = _standardize_stratify(stratify, label_frame)
     if stratify is None:
         # Assume each column is used to stratify
         stratify = [True]*len(label_frame.columns)
