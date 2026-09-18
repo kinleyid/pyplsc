@@ -131,8 +131,10 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
                     legend_handles[hue_level] = bars[0]
 
             curr_ax.set_xticks(x_base)
+            # set_trace()
             if mapping['x'] is not None:
                 curr_ax.set_xticklabels([str(v) for v in mapping_levels['x']])
+                curr_ax.tick_params("x", rotation=90)
             
             # Label row and column
             ax_title_parts = []

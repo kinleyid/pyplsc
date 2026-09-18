@@ -14,6 +14,7 @@ from . import utils, viz
 from pdb import set_trace
 from scipy.linalg import orthogonal_procrustes
 
+doc_labels = "Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column. For example: between-subjects conditions would be broader than participants, which would be broader than within-subjects conditions."
 class NotFittedError(Exception):
     def __init__(self):
         self.message = '.fit() has not yet been called to fit model'
@@ -401,12 +402,15 @@ class BaseClass():
         '''
         if self._has_covariates:
             perm_func = utils._permute_covariates
+            kwargs = {}
         else:
             perm_func = utils._permute_labels
+            kwargs = dict(return_flips=self._test_intercept)
         perms = Parallel(n_jobs=n_jobs)(
             delayed(perm_func)(self.label_mat_,
                                self.permute_,
-                               np.random.default_rng(child_seq))
+                               np.random.default_rng(child_seq),
+                               **kwargs)
             for child_seq in tqdm(child_sequences, desc='Getting permutations', disable=silent)
         )
         '''
@@ -750,7 +754,7 @@ class PLSC(BaseClass):
             design_scores = self.covariates_ @ self.design_sals_
         return design_scores
     def fit(self, data, covariates, labels=None, stratify=None):
-        """
+        f"""
         Fit a PLSC model.
 
         Parameters
@@ -760,7 +764,7 @@ class PLSC(BaseClass):
         covariates : numpy.ndarray | pd.DataFrame
             Covariate array or dataframe of shape (n. observations, n. covariates).
         labels : numpy.ndarray | pd.DataFrame
-            Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column.
+            {doc_labels}
         stratify : numpy.ndarray | list of bool | list of str
             Iterable of booleans of length n. levels, each specifying whether the corresponding column in ``labels`` is used to stratify the data (``True``) or not (``False``). Alternatively, a list of strings specifying the columns in ``labels`` used to stratify the data.
 
@@ -786,7 +790,7 @@ class PLSC(BaseClass):
         >>> stratify = [True, False, False]
         >>> # Fit model
         >>> mod = pyplsc.PLSC()
-        >>> mod.fit(data=data, covariates=covs, stratify=stratify)
+        >>> mod.fit(data=data, labels=labels, covariates=covs, stratify=stratify)
         """
         if labels is None:
             # Assume no stratification
@@ -898,6 +902,8 @@ class BDA(BaseClass):
     
     Parameters
     ----------
+    intercept : bool, optional
+        Specifies whether the intercept should be included or subtracted from the model (i.e., for mean-centred PLS). The default is ``False``, which subtracts the intercept.
     boot_stat : str, optional
         Name of statistic to recompute on each bootstrap resample to get a confidence interval. Must be one of:
 
@@ -913,11 +919,8 @@ class BDA(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
-    def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, include_intercept=False, test_intercept=False):
-        self._include_intercept = include_intercept
-        if test_intercept and not include_intercept:
-            raise ValueError('test_intercept cannot be true if include_intercept is false')
-        self._test_intercept = test_intercept
+    def __init__(self, svd_method='lapack', boot_stat=None, random_state=None, intercept=False):
+        self._include_intercept = self._test_intercept = intercept
         super().__init__(svd_method=svd_method, boot_stat=boot_stat, random_state=random_state)
     def _get_design_scores(self):
         if not any(self.stratify_):
@@ -1097,11 +1100,8 @@ class NRM(BaseClass):
     """
     _min_unique = 1 # For resampling
     _has_covariates = False
-    def __init__(self, boot_stat=None, random_state=None, include_intercept=False, test_intercept=False):
-        self._include_intercept = include_intercept
-        if test_intercept and not include_intercept:
-            raise ValueError('test_intercept cannot be true if include_intercept is false')
-        self._test_intercept = test_intercept
+    def __init__(self, boot_stat=None, random_state=None, intercept=False):
+        self._include_intercept = self._test_intercept = intercept
         super().__init__(svd_method=None, boot_stat=boot_stat, random_state=random_state)
     def _setup_contrasts(self, contrasts, normalize):
         # Set contrasts to evaluate.

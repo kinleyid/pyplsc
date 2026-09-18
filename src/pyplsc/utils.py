@@ -161,7 +161,7 @@ def _permute_covariates(labels, permute, rng):
             cov_perm[mask] = cov_perm[mask][perm]
     return (cov_perm,)
 
-def _permute_labels(labels, permute, rng, return_cov_perm=False, return_flips=False):
+def _permute_labels(labels, permute, rng, return_flips=False):
     permuted_labels = labels.copy()
     n_obs, n_levels = labels.shape
 
