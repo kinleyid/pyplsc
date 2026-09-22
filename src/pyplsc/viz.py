@@ -1,5 +1,4 @@
 
-from matplotlib import pyplot as plt
 import numpy as np
 
 from pdb import set_trace
@@ -40,6 +39,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     >>> plot_bot_stat(df, mapping={'hue': 'covariate'}, ax=ax)
     
     """
+    from matplotlib.pyplot import rcParams
     n_strat = len(mapping)
     if n_strat > 4:
         raise ValueError('Cannot create a plot for more than 4 stratifying variables')
@@ -80,7 +80,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     nhue = mapping_counts['hue']
     slot_width = bar_width / max(nhue, 1)
     x_base = np.arange(mapping_counts['x']) * (1 + group_gap)
-    cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    cycle = rcParams["axes.prop_cycle"].by_key()["color"]
     color_map = {h: cycle[i % len(cycle)] for i, h in enumerate(mapping_levels['hue'])}
     
     # Generate plots
@@ -164,8 +164,9 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     return f
 
 def _get_boot_stat_ax(ax, nrows, ncols):
+    from matplotlib.pyplot import subplots
     if ax is None:
-        f, ax = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
+        f, ax = subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
     else:
         f = ax.get_figure()
         subplotspec = ax.get_subplotspec()

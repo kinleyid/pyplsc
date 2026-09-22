@@ -1,8 +1,6 @@
 
 import numpy as np
 from tqdm import tqdm
-from sklearn.utils.extmath import randomized_svd
-from numpy.linalg import svd as lapack_svd
 from joblib import Parallel, delayed, effective_n_jobs
 import pandas as pd
 import os, pathlib
@@ -12,7 +10,6 @@ import copy
 from . import utils, viz
 
 from pdb import set_trace
-from scipy.linalg import orthogonal_procrustes
 
 doc_labels = "Data label array or dataframe of shape (n. observations, n. levels) where n. levels refers to the number of levels at which the data are labeled. The hierarchy of labels moves from left to right---i.e., the broadest classifications should be in the leftmost column and the most granular classifications in the rightmost column. For example: between-subjects conditions would be broader than participants, which would be broader than within-subjects conditions."
 class NotFittedError(Exception):
@@ -64,6 +61,7 @@ class BaseClass():
         # Document inheritable attributes in one place; requires initializing many to None but worth it imo
         # Attributes set by __init__()
         self.svd_method = svd_method #: ``str``: SVD method used
+        self._setup_svd()
         self.boot_stat = boot_stat #: ``str``: Name of statistic whose distribution is derived during bootstrap resampling.
         self.random_state = random_state #: ``int``: Random state for reproducible permutation and bootstrap resampling.
         # Attributes set by fit()
@@ -123,15 +121,22 @@ class BaseClass():
         self.stratify_ = utils._standardize_stratify(stratify, self.label_frame_)
         self.resample_ = ~self.stratify_ # TODO: set as needed
         self.permute_ = self.stratify_
+    def _setup_svd(self):
+        if self.svd_method == 'lapack':
+            from numpy.linalg import svd as lapack_svd
+            self._svd_func = lapack_svd
+        elif self.svd_method == 'randomized':
+            from sklearn.utils.extmath import randomized_svd
+            self._svd_func = randomized_svd
     def _svd(self, M, compute_uv=True):
         # Single function to perform svd using the specified method
         if self.svd_method == 'lapack':
             if compute_uv:
-                u, s, v = lapack_svd(M, full_matrices=False, compute_uv=True)
+                u, s, v = self._svd_func(M, full_matrices=False, compute_uv=True)
             else:
-                s = lapack_svd(M, full_matrices=False, compute_uv=False)
+                s = self._svd_func(M, full_matrices=False, compute_uv=False)
         elif self.svd_method == 'randomized':
-            u, s, v = randomized_svd(M, n_components=len(M))
+            u, s, v = self._svd_func(M, n_components=len(M))
         s[self.rank_:] = 0
         if compute_uv:
             out = u, s, v.T
@@ -535,6 +540,7 @@ class BaseClass():
             resamples.append(resample)
         return resamples        
     def _align(self, u, s, v, method):
+        from scipy.linalg import orthogonal_procrustes
         if method == 'rotate-data-sals':
             A, _ = orthogonal_procrustes(v, self.data_sals_, check_finite=False)
         elif method == 'rotate-design-sals':
@@ -785,7 +791,7 @@ class PLSC(BaseClass):
         >>> cond_labels = np.concat([cond]*n_trials for cond, n_trials in zip(ptptwise_conds, ptptwise_n_trials)])
         >>> ptpt_ids = np.concat([ptpt_id]*n_trials for ptpt_id, n_trials in enumerate(ptptwise_n_trials)])
         >>> trial_labels = np.arange(np.sum(ptptwise_n_trials))
-        >>> labels = pd.DataFrame({'cond': cond_labels, 'ptpt': ptpt_ids, 'trial': trial_labels})
+        >>> labels = pd.DataFrame({{'cond': cond_labels, 'ptpt': ptpt_ids, 'trial': trial_labels}})
         >>> # Stratify only by condition, not by participant or trial
         >>> stratify = [True, False, False]
         >>> # Fit model
