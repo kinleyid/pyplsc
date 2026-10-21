@@ -111,30 +111,12 @@ def test_errors(sample_data):
     with pytest.raises(Exception):
         # Nothing to stratify observations
         bda.fit(data)
-        '''
-    with pytest.raises(Exception):
-        # Within condition without a way to differentiate participants
-        bda.fit(data, within=within)
-        '''
-    with pytest.raises(Exception):
-        # Different length of condition indicator vs data
-        bda.fit(data, labels=labels.iloc[:(len(data) - 1)])
     with pytest.raises(Exception):
         # Nothing to stratify observations
         bda.fit(data, labels=[0]*len(data))
     with pytest.raises(Exception):
         # yerr without having resampled
         bda.get_design_yerr(0)
-        '''
-    with pytest.raises(Exception):
-        # testing nonexistent effect
-        bda.fit(data, between=between, effects={'within'})
-        '''
-        '''
-    with pytest.raises(Exception):
-        # testing nonexistent effect
-        bda.fit(data, within=within, participant=participant, effects={'between'})
-        '''
     with pytest.raises(pyplsc.NotFittedError):
         # Not fitted
         mod = pyplsc.PLSC()
@@ -174,10 +156,10 @@ def test_bda_effects(sample_data):
     bda = pyplsc.BDA()
     bda.fit(data=data, labels=labels,
             stratify=['between', 'within'],
-            effects=['between'])
+            effects=['between:within'])
     bda.fit(data=data, labels=labels,
             stratify=['between', 'within'],
-            rm_effects=['between'])
+            rm_effects=['between:within'])
 
 def test_bda_input(sample_data):
     data, _, labels, stratify = sample_data
