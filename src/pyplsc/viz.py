@@ -40,6 +40,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     
     """
     from matplotlib.pyplot import rcParams
+    
     n_strat = len(mapping)
     if n_strat > 4:
         raise ValueError('Cannot create a plot for more than 4 stratifying variables')
@@ -71,7 +72,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
     # Get subdivided axes
     nrows = mapping_counts['row']
     ncols = mapping_counts['column']
-    f, ax = _get_boot_stat_ax(ax, nrows, ncols)
+    f, ax = _subdivide_axes(ax, nrows, ncols)
     
     # Boot done?
     has_yerr = 'L_CI' in df and 'U_CI' in df
@@ -163,7 +164,7 @@ def plot_boot_stat(df, mapping, ax=None, ylabel=None,
 
     return f
 
-def _get_boot_stat_ax(ax, nrows, ncols):
+def _subdivide_axes(ax, nrows, ncols):
     from matplotlib.pyplot import subplots
     if ax is None:
         f, ax = subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)

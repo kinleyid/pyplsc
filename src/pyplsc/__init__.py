@@ -38,7 +38,7 @@ def load(path):
     Returns
     -------
     model
-        The loaded model, of the same .
+        The loaded model.
     """
     
     path = pathlib.Path(path)
@@ -108,14 +108,22 @@ class BaseClass():
         if not valid_data:
             raise ValueError('data must be a 1- or 2-dimensional numpy array')
         self.data_ = data
-    def _setup_labels(self, labels):
+    def _setup_labels(self, labels, stratify):
         label_frame, label_mat = utils._standardize_labels(labels)
+        # Check that each observation can be uniquely identified
+        unique_clusters = np.unique(label_mat, axis=0)
+        if len(unique_clusters) < len(labels):
+            # Need an "obs" column to uniquely identify
+            if 'obs' in labels:
+                raise ValueError('Individual observations cannot be uniquely identified under the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows) and not used for stratification')
+            else:
+                labels['obs'] = np.arange(len(labels))
+                label_frame, label_mat = utils._standardize_labels(labels)
+                # Re-do stratification
+                stratify.append(False)
         self.label_frame_ = label_frame
         self.label_mat_ = label_mat
-        # Check that each observation can be uniquely identified
-        unique_clusters = np.unique(self.label_mat_, axis=0)
-        if len(unique_clusters) < len(labels):
-            raise ValueError('Individual observations cannot be uniquely identified with the current data labels. Consider adding a final "obs" column populated by np.arange(num_rows).')
+        return stratify
     def _setup_stratification(self, stratify):
         # Set up attributes that determine how data will be stratified
         self.stratify_ = utils._standardize_stratify(stratify, self.label_frame_)
@@ -163,12 +171,12 @@ class BaseClass():
         Returns
         -------
         :class:`pandas.DataFrame`
-            Data frame with one row per latent variable pair.
+            Data frame with one row per latent variable pair containing the singular value and significance if computed.
         
         Examples
         --------
         >>> df = mod.summary()
-        >>> df.to_csv('summary.csv')
+        >>> mod.summary().to_csv('summary.csv')
         """
         df = pd.DataFrame({
             'LV index': range(self.n_sv_),
@@ -184,12 +192,10 @@ class BaseClass():
         """
         Flips the signs of one or more latent variables, to aid with interpretation.
 
-        :param lv_idx: The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
-
         Parameters
         ----------
         lv_idx : indexer
-            The index or indices of latent variables whose signs should be flipped. If None (default), signs are flipped for all latent variables.
+            The index or indices of latent variables whose signs should be flipped. If ``None`` (default), signs are flipped for all latent variables.
 
         Examples
         --------
@@ -217,7 +223,7 @@ class BaseClass():
         Parameters
         ----------
         data : numpy.ndarray, optional
-            Data to transform. The default is None, which yields scores for the data on which the model was fit (the :attr:`data_` property).
+            Data to transform. The default is ``None``, which yields scores for the data on which the model was fit (the :attr:`data_` property).
         lv_idx : indexer, optional
             Index of latent variable(s) for which to compute scores. Default is None, which computes scores for all latent variables.
 
@@ -804,9 +810,9 @@ class PLSC(BaseClass):
             stratify = [False]
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
-        self._setup_labels(labels)
-        self._setup_covariates(covariates)
+        stratify = self._setup_labels(labels, stratify)
         self._setup_stratification(stratify)
+        self._setup_covariates(covariates)
         R = utils.stratified_corrs(data=self.data_,
                                    covariates=self.covariates_,
                                    labels=self.label_mat_,
@@ -961,7 +967,7 @@ class BDA(BaseClass):
                 all_effects = utils.get_combinations(range(len(columns)))
                 self.effects_ = list(set(all_effects) - set(rm_effects))
                 
-    def fit(self, data, labels, stratify, effects=None, rm_effects=None):
+    def fit(self, data, labels, stratify=None, effects=None, rm_effects=None):
         """
         Fit a BDA model.
 
@@ -996,9 +1002,12 @@ class BDA(BaseClass):
         """
         if effects is not None and rm_effects is not None:
             raise ValueError('Only one of include_effects and rm_effects may be specified, not both')
+        if stratify is None:
+            # Assume all labels are for stratification
+            stratify = [True] * len(labels.columns)
         # Compute within-participant stacked correlation matrices
         self._setup_data(data)
-        self._setup_labels(labels)
+        stratify = self._setup_labels(labels, stratify)
         self._setup_stratification(stratify)
         self._setup_effects(effects, rm_effects)
         M = utils.stratified_average(self.data_,
@@ -1174,7 +1183,7 @@ class NRM(BaseClass):
         
         """
         self._setup_data(data)
-        self._setup_labels(labels)
+        stratify = self._setup_labels(labels, stratify)
         self._setup_stratification(stratify)
         self.design_sal_labels_ = self._get_design_sal_labels()
         self._setup_contrasts(contrasts, normalize)

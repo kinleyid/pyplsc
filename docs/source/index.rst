@@ -6,7 +6,7 @@
 pyplsc
 ====================
 
-A python implementation of partial least squares correlation (PLSC).
+A python implementation of partial least squares correlation (PLSC). For details on this method, see `Krishnan et al. (2011) <https://doi.org/10.1016/j.neuroimage.2010.07.034>`_.
 
 Installation
 ------------
